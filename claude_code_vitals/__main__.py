@@ -5,7 +5,7 @@ import json
 from typing import Optional
 
 from .config import load_config, Config
-from .logger import parse_statusline_json, extract_snapshot, append_snapshot, should_log
+from .logger import _parse_iso, parse_statusline_json, extract_snapshot, append_snapshot, should_log
 from .detector import detect_drift, Signal
 from .renderer import render, render_expanded, C
 from .oauth import fetch_usage, oauth_to_snapshot
@@ -314,7 +314,7 @@ def run_statusline(config: Config, log_only: bool = False, debug: bool = False):
 
 def _compute_switch_hint(current_snapshot, config: Config) -> Optional[str]:
     """Find the best alternative model when current model is running low."""
-    from .logger import load_history
+    from .logger import _parse_iso, load_history
     from collections import defaultdict
 
     history = load_history(config, max_age_days=1)
@@ -369,8 +369,8 @@ def _compute_burn_rate(readings: list) -> Optional[str]:
     r2 = valid[-1]
 
     try:
-        t1 = datetime.fromisoformat(r1.ts)
-        t2 = datetime.fromisoformat(r2.ts)
+        t1 = _parse_iso(r1.ts)
+        t2 = _parse_iso(r2.ts)
     except (ValueError, TypeError):
         return None
 
@@ -390,7 +390,7 @@ def show_compare(config: Config, all_models: bool = False, session_mode: bool = 
     long-term periods (today/yesterday/week) use global data [G].
     When session_mode=False: all periods use global data [G].
     """
-    from .logger import load_history
+    from .logger import _parse_iso, load_history
     from datetime import datetime, timezone, timedelta
     from collections import defaultdict
     import statistics
@@ -421,7 +421,7 @@ def show_compare(config: Config, all_models: bool = False, session_mode: bool = 
 
     def _parse_ts(ts_str: str) -> Optional[datetime]:
         try:
-            dt = datetime.fromisoformat(ts_str)
+            dt = _parse_iso(ts_str)
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)
             return dt
@@ -636,7 +636,7 @@ def baseline_command(config: Config, args: list):
         ccvitals baseline unfreeze          # Unfreeze baselines
     """
     import statistics
-    from .logger import load_history
+    from .logger import _parse_iso, load_history
     from collections import defaultdict
     from datetime import datetime, timezone
 
@@ -819,7 +819,7 @@ def _get_current_session_id(config: Config) -> Optional[str]:
 
 def show_budget(config: Config):
     """Show remaining session budget across all models."""
-    from .logger import load_history
+    from .logger import _parse_iso, load_history
     from collections import defaultdict
     from datetime import datetime, timezone
 
@@ -855,8 +855,8 @@ def show_budget(config: Config):
             if len(valid) >= 2:
                 r1, r2 = valid[-2], valid[-1]
                 try:
-                    t1 = datetime.fromisoformat(r1.ts).replace(tzinfo=timezone.utc)
-                    t2 = datetime.fromisoformat(r2.ts).replace(tzinfo=timezone.utc)
+                    t1 = _parse_iso(r1.ts).replace(tzinfo=timezone.utc)
+                    t2 = _parse_iso(r2.ts).replace(tzinfo=timezone.utc)
                     hrs = (t2 - t1).total_seconds() / 3600
                     if 0.25 <= hrs <= 2:
                         delta = r2.session_5h_pct - r1.session_5h_pct
@@ -1000,7 +1000,7 @@ def _peak_overlap_tip(history: list) -> Optional[str]:
 
 def show_suggest(config: Config):
     """Show all models ranked by remaining quota with burn rates."""
-    from .logger import load_history
+    from .logger import _parse_iso, load_history
     from collections import defaultdict
 
     history = load_history(config, max_age_days=1)
@@ -1074,7 +1074,7 @@ def show_status(config: Config, show_readings: bool = False,
         --show-readings   Append readings count
         --show-remaining  Show remaining % instead of used %
     """
-    from .logger import load_history
+    from .logger import _parse_iso, load_history
     from .renderer import render_compact
     from collections import defaultdict
 
@@ -1246,7 +1246,7 @@ def config_command(config: Config, args: list):
 
 def generate_report(config: Config):
     """Generate an HTML trend report and open it in the browser."""
-    from .logger import load_history
+    from .logger import _parse_iso, load_history
     import webbrowser
     from pathlib import Path
 

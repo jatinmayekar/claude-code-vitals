@@ -16,7 +16,7 @@ from typing import Optional
 from pathlib import Path
 
 from .config import Config
-from .logger import RateLimitSnapshot, load_history
+from .logger import _parse_iso, RateLimitSnapshot, load_history
 
 
 class Signal(Enum):
@@ -298,8 +298,8 @@ def detect_drift(snapshot: Optional[RateLimitSnapshot], config: Config) -> Drift
     if confirmed_signal == Signal.SPIKE and burn_rate is not None and burn_rate > 0:
         hist_rates = []
         for i in range(1, len(history)):
-            prev_ts = datetime.fromisoformat(history[i-1].ts).replace(tzinfo=timezone.utc)
-            curr_ts = datetime.fromisoformat(history[i].ts).replace(tzinfo=timezone.utc)
+            prev_ts = _parse_iso(history[i-1].ts).replace(tzinfo=timezone.utc)
+            curr_ts = _parse_iso(history[i].ts).replace(tzinfo=timezone.utc)
             hrs = (curr_ts - prev_ts).total_seconds() / 3600
             if 0.1 <= hrs <= 2.0 and history[i].session_5h_pct and history[i-1].session_5h_pct:
                 delta = history[i].session_5h_pct - history[i-1].session_5h_pct
@@ -375,7 +375,7 @@ def compute_burn_rate(snapshot: Optional[RateLimitSnapshot],
         return None, None
 
     current_pct = snapshot.session_5h_pct
-    current_ts = datetime.fromisoformat(snapshot.ts) if snapshot.ts else datetime.now(timezone.utc)
+    current_ts = _parse_iso(snapshot.ts) if snapshot.ts else datetime.now(timezone.utc)
     if current_ts.tzinfo is None:
         current_ts = current_ts.replace(tzinfo=timezone.utc)
 
@@ -388,12 +388,12 @@ def compute_burn_rate(snapshot: Optional[RateLimitSnapshot],
         if snapshot.session_id and s.session_id and s.session_id != snapshot.session_id:
             continue
         try:
-            s_ts = datetime.fromisoformat(s.ts)
+            s_ts = _parse_iso(s.ts)
             if s_ts.tzinfo is None:
                 s_ts = s_ts.replace(tzinfo=timezone.utc)
             age_hours = (current_ts - s_ts).total_seconds() / 3600
             if 0.25 <= age_hours <= 2.0:  # Between 15min and 2hrs ago
-                if best_earlier is None or s_ts < datetime.fromisoformat(best_earlier.ts).replace(tzinfo=timezone.utc):
+                if best_earlier is None or s_ts < _parse_iso(best_earlier.ts).replace(tzinfo=timezone.utc):
                     best_earlier = s
         except (ValueError, TypeError):
             continue
@@ -401,7 +401,7 @@ def compute_burn_rate(snapshot: Optional[RateLimitSnapshot],
     if best_earlier is None:
         return None, None
 
-    earlier_ts = datetime.fromisoformat(best_earlier.ts)
+    earlier_ts = _parse_iso(best_earlier.ts)
     if earlier_ts.tzinfo is None:
         earlier_ts = earlier_ts.replace(tzinfo=timezone.utc)
 
@@ -471,7 +471,7 @@ def detect_peak_status(snapshot_ts: str) -> tuple[bool, Optional[int]]:
     Returns (is_peak, minutes_until_peak_ends).
     """
     try:
-        dt = datetime.fromisoformat(snapshot_ts)
+        dt = _parse_iso(snapshot_ts)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         # Convert UTC to PT (UTC-7, ignoring DST for simplicity)
@@ -543,8 +543,8 @@ def compute_cache_health(snapshot: Optional[RateLimitSnapshot],
     idle_seconds = None
     if prev_snapshot:
         try:
-            prev_ts = datetime.fromisoformat(prev_snapshot.ts)
-            curr_ts = datetime.fromisoformat(snapshot.ts)
+            prev_ts = _parse_iso(prev_snapshot.ts)
+            curr_ts = _parse_iso(snapshot.ts)
             if prev_ts.tzinfo is None:
                 prev_ts = prev_ts.replace(tzinfo=timezone.utc)
             if curr_ts.tzinfo is None:
@@ -603,7 +603,7 @@ def hourly_comparison(history: list[RateLimitSnapshot],
     historical = [s for s in history if s.session_5h_pct is not None]
     try:
         historical = [s for s in historical
-                      if datetime.fromisoformat(s.ts).replace(tzinfo=timezone.utc) > cutoff]
+                      if _parse_iso(s.ts).replace(tzinfo=timezone.utc) > cutoff]
     except (ValueError, TypeError):
         return None
 
@@ -616,8 +616,8 @@ def hourly_comparison(history: list[RateLimitSnapshot],
             # Only use same-session pairs
             if historical[i].session_id and historical[i-1].session_id and historical[i].session_id != historical[i-1].session_id:
                 continue
-            t1 = datetime.fromisoformat(historical[i-1].ts).replace(tzinfo=timezone.utc)
-            t2 = datetime.fromisoformat(historical[i].ts).replace(tzinfo=timezone.utc)
+            t1 = _parse_iso(historical[i-1].ts).replace(tzinfo=timezone.utc)
+            t2 = _parse_iso(historical[i].ts).replace(tzinfo=timezone.utc)
             hrs = (t2 - t1).total_seconds() / 3600
             if 0.05 <= hrs <= 2.0:
                 delta = historical[i].session_5h_pct - historical[i-1].session_5h_pct
@@ -663,7 +663,7 @@ def detect_time_pattern(history: list[RateLimitSnapshot]) -> Optional[str]:
     timestamps: list[datetime] = []
     for snap in history:
         try:
-            timestamps.append(datetime.fromisoformat(snap.ts))
+            timestamps.append(_parse_iso(snap.ts))
         except (ValueError, TypeError):
             continue
 
@@ -686,7 +686,7 @@ def detect_time_pattern(history: list[RateLimitSnapshot]) -> Optional[str]:
         if snap.weekly_7d_pct is None:
             continue
         try:
-            dt = datetime.fromisoformat(snap.ts)
+            dt = _parse_iso(snap.ts)
             bucket = dt.hour // 2
             buckets[bucket].append(snap.weekly_7d_pct)
         except (ValueError, TypeError):

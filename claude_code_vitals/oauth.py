@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from .config import Config, CLAUDE_CREDENTIALS_PATH
-from .logger import RateLimitSnapshot
+from .logger import _parse_iso, RateLimitSnapshot
 
 
 OAUTH_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
@@ -158,7 +158,7 @@ def _load_cache(config: Config) -> Optional[OAuthUsageData]:
         return None
 
     try:
-        fetched_dt = datetime.fromisoformat(fetched_at)
+        fetched_dt = _parse_iso(fetched_at)
         age = (datetime.now(timezone.utc) - fetched_dt).total_seconds()
         if age > MIN_POLL_INTERVAL_SECONDS:
             return None  # Cache expired

@@ -17,6 +17,17 @@ from typing import Optional
 from .config import Config
 
 
+def _parse_iso(ts: str) -> datetime:
+    """Parse ISO 8601 timestamp with Python 3.10 compat.
+
+    Python 3.10's fromisoformat() does not support the 'Z' UTC suffix
+    (added in 3.11 via PEP). This helper normalizes 'Z' to '+00:00'.
+    """
+    if ts.endswith("Z"):
+        ts = ts[:-1] + "+00:00"
+    return datetime.fromisoformat(ts)
+
+
 @dataclass
 class RateLimitSnapshot:
     """A single point-in-time observation of rate limit ceilings."""
@@ -268,8 +279,8 @@ def should_log(snapshot: RateLimitSnapshot, config: Config) -> bool:
     # Same values — check time delta
     last_ts = last.get("ts", "")
     try:
-        last_dt = datetime.fromisoformat(last_ts)
-        now_dt = datetime.fromisoformat(snapshot.ts)
+        last_dt = _parse_iso(last_ts)
+        now_dt = _parse_iso(snapshot.ts)
         delta = (now_dt - last_dt).total_seconds()
         # Log at most once per 5 minutes if values haven't changed
         return delta >= 300

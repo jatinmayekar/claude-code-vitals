@@ -1,3 +1,4 @@
+from .logger import _parse_iso
 """Status bar renderer for claude_code_vitals.
 
 Formats DriftResult into ANSI-colored terminal output for Claude Code's
@@ -306,7 +307,7 @@ def render_expanded(result: DriftResult, config: Config) -> str:
     if result.change_detected_at and result.signal != Signal.NORMAL:
         since = _format_relative_time(result.change_detected_at)
         try:
-            dt = datetime.fromisoformat(result.change_detected_at)
+            dt = _parse_iso(result.change_detected_at)
             date_str = dt.strftime("%b %d")
         except (ValueError, TypeError):
             date_str = "unknown"
@@ -345,7 +346,7 @@ def _color_pct(raw_used_pct: float) -> str:
 def _format_countdown(iso_str: str) -> Optional[str]:
     """Return time remaining until iso_str, e.g. '1h 50m'. None if expired or invalid."""
     try:
-        dt = datetime.fromisoformat(iso_str)
+        dt = _parse_iso(iso_str)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         remaining = (dt - datetime.now(timezone.utc)).total_seconds()
@@ -363,7 +364,7 @@ def _format_countdown(iso_str: str) -> Optional[str]:
 def _format_relative_time(iso_str: str) -> str:
     """Format an ISO timestamp as relative time (e.g., '2 days ago')."""
     try:
-        dt = datetime.fromisoformat(iso_str)
+        dt = _parse_iso(iso_str)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         now = datetime.now(timezone.utc)
