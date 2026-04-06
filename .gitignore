@@ -1,0 +1,44 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+.eggs/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+
+*.bak
+claude-code-vitals-*.tar.gz
+
+# claude-code-vitals local data (never commit user data)
+history.jsonl
+usage-cache.json
+global-baseline.json
+state.json
+report.html
+current-session-id
+baseline-frozen.json
+
+# Claude Code worktrees
+.claude/worktrees/

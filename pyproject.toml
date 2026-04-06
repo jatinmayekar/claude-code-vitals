@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claude-code-vitals"
+version = "0.2.0"
+description = "Rate-limit vitals for Claude Code — burn rate, cache health, and baseline shift detection."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "Jatin Mayekar", email = "jatinmayekar27@gmail.com"},
+]
+keywords = ["claude-code", "claude", "anthropic", "rate-limit", "usage", "monitor", "statusline", "burn-rate", "cache", "vitals"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: System :: Monitoring",
+]
+
+[project.urls]
+Homepage = "https://github.com/jatinmayekar/claude-code-vitals"
+Repository = "https://github.com/jatinmayekar/claude-code-vitals"
+Issues = "https://github.com/jatinmayekar/claude-code-vitals/issues"
+Documentation = "https://github.com/jatinmayekar/claude-code-vitals#readme"
+
+[project.scripts]
+ccvitals = "claude_code_vitals.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["claude_code_vitals*"]
