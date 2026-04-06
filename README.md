@@ -4,9 +4,7 @@
 
 A passive, always-on rate limit monitor for Claude Code. Tracks drift, predicts depletion, detects cache resets, and tells you when to switch models. Zero token cost. Zero external dependencies.
 
-```
-Opus 4.6 (1M context)  |  5h: 87% left  |  7d: 84% left  |  resets 2h 17m
-```
+![demo](demo.gif)
 
 Percentages are color-coded: **green** (<50% used), **yellow** (50-80%), **red** (>80%).
 
