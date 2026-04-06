@@ -493,7 +493,7 @@ def test_cache_health_efficiency():
 
 
 def test_cache_health_idle_warning():
-    """Idle gap >5min -> idle_warning present."""
+    """Idle gap >5min (based on last_run_ts) -> idle_warning present."""
     prev = RateLimitSnapshot(
         ts="2026-03-30T14:00:00Z",
         provider="anthropic", model_id="claude-opus-4-6", model_name="Opus 4.6",
@@ -508,11 +508,60 @@ def test_cache_health_idle_warning():
         weekly_7d_pct=67.0, weekly_7d_reset=None,
         context_used_pct=55, context_window_size=200000, session_cost_usd=0.5,
     )
-    result = compute_cache_health(snap, prev)
-    assert "idle_warning" in result, "Expected idle_warning for 10min gap"
+    # last_run_ts matches prev snapshot — genuine 10min idle
+    result = compute_cache_health(snap, prev, last_run_ts="2026-03-30T14:00:00Z")
+    assert "idle_warning" in result, "Expected idle_warning for 10min idle"
     assert "Idle 10min" in result["idle_warning"]
-    assert "cache expired" in result["idle_warning"].lower()
+    assert "cache was cold" in result["idle_warning"].lower()
     print("  ✓ test_cache_health_idle_warning")
+
+
+def test_cache_health_no_idle_warning_when_active():
+    """Debounce-inflated gap should NOT trigger idle warning when last_run_ts is recent."""
+    prev = RateLimitSnapshot(
+        ts="2026-03-30T14:00:00Z",  # Logged 6 min ago (debounce held writes)
+        provider="anthropic", model_id="claude-opus-4-6", model_name="Opus 4.6",
+        session_5h_pct=40.0, session_5h_reset=None,
+        weekly_7d_pct=65.0, weekly_7d_reset=None,
+        context_used_pct=50, context_window_size=200000, session_cost_usd=0.4,
+    )
+    snap = RateLimitSnapshot(
+        ts="2026-03-30T14:06:00Z",  # 6 min gap in logged snapshots
+        provider="anthropic", model_id="claude-opus-4-6", model_name="Opus 4.6",
+        session_5h_pct=40.0, session_5h_reset=None,
+        weekly_7d_pct=65.0, weekly_7d_reset=None,
+        context_used_pct=55, context_window_size=200000, session_cost_usd=0.5,
+    )
+    # last_run_ts is recent — user was active, should_log just debounced
+    result = compute_cache_health(snap, prev, last_run_ts="2026-03-30T14:05:50Z")
+    assert "idle_warning" not in result, (
+        "Should NOT warn when last_run_ts is recent (debounce-inflated gap)"
+    )
+    print("  ✓ test_cache_health_no_idle_warning_when_active")
+
+
+def test_cache_health_no_warning_180_300s_gap():
+    """180-300s gap should NOT produce idle warning (removed — contradictory)."""
+    prev = RateLimitSnapshot(
+        ts="2026-03-30T14:00:00Z",
+        provider="anthropic", model_id="claude-opus-4-6", model_name="Opus 4.6",
+        session_5h_pct=40.0, session_5h_reset=None,
+        weekly_7d_pct=65.0, weekly_7d_reset=None,
+        context_used_pct=50, context_window_size=200000, session_cost_usd=0.4,
+    )
+    snap = RateLimitSnapshot(
+        ts="2026-03-30T14:03:20Z",  # 200 seconds later (in 180-300s range)
+        provider="anthropic", model_id="claude-opus-4-6", model_name="Opus 4.6",
+        session_5h_pct=42.0, session_5h_reset=None,
+        weekly_7d_pct=67.0, weekly_7d_reset=None,
+        context_used_pct=55, context_window_size=200000, session_cost_usd=0.5,
+    )
+    # Even with last_run_ts matching prev (200s true idle), no warning
+    result = compute_cache_health(snap, prev, last_run_ts="2026-03-30T14:00:00Z")
+    assert "idle_warning" not in result, (
+        "180-300s gap should NOT produce idle warning"
+    )
+    print("  ✓ test_cache_health_no_warning_180_300s_gap")
 
 
 # ===== Baseline Tests =====
@@ -923,6 +972,8 @@ def run_all():
     test_cache_health_compact_warning_opus()
     test_cache_health_efficiency()
     test_cache_health_idle_warning()
+    test_cache_health_no_idle_warning_when_active()
+    test_cache_health_no_warning_180_300s_gap()
 
     # ===== Baseline Tests =====
     print("\nBaseline:")
@@ -959,6 +1010,8 @@ def run_all():
     test_detect_family_known_models()
     test_member_label_strips_family_prefix()
     test_group_by_family_preserves_all_variants()
+    test_aggregate_to_selectable_picks_latest_only()
+    test_merge_family_history_combines_all()
 
     print("\nInit Upgrade:")
     test_init_upgrades_legacy_limitwatch_in_place()
@@ -1088,6 +1141,101 @@ def test_group_by_family_preserves_all_variants():
     assert _group_by_family({}) == {}
 
     print("  ✓ test_group_by_family_preserves_all_variants")
+
+
+def test_aggregate_to_selectable_picks_latest_only():
+    """Actionable commands must use ONLY the most-recent variant per family.
+
+    Old variant readings may be from a different model Anthropic has since
+    updated. Mixing stale data with current data produces garbage burn rates.
+    """
+    from claude_code_vitals.__main__ import _aggregate_to_selectable, _group_by_family
+    from claude_code_vitals.logger import RateLimitSnapshot
+
+    def mk(model_id, model_name, ts, pct=50.0):
+        return RateLimitSnapshot(
+            ts=ts, provider="anthropic",
+            model_id=model_id, model_name=model_name,
+            session_5h_pct=pct, session_5h_reset=None,
+            weekly_7d_pct=40.0, weekly_7d_reset=None,
+            context_used_pct=None, context_window_size=None,
+        )
+
+    by_model = {
+        "opus":                [mk("opus", "Opus 4.6", "2026-04-01T10:00:00+00:00", 80.0)],  # stale
+        "claude-opus-4-6":     [mk("claude-opus-4-6", "Opus 4.6", "2026-04-03T10:00:00+00:00", 60.0)],  # older
+        "claude-opus-4-6[1m]": [
+            mk("claude-opus-4-6[1m]", "Opus 4.6 (1M context)", "2026-04-05T09:00:00+00:00", 10.0),
+            mk("claude-opus-4-6[1m]", "Opus 4.6 (1M context)", "2026-04-05T10:00:00+00:00", 15.0),
+        ],  # latest
+        "claude-sonnet-4-6":   [mk("claude-sonnet-4-6", "Sonnet 4.6", "2026-04-05T10:00:00+00:00", 55.0)],
+    }
+
+    families = _group_by_family(by_model)
+    selectable = _aggregate_to_selectable(families)
+
+    # Should have 2 families: Opus and Sonnet (no Haiku data)
+    family_names = [name for name, _ in selectable]
+    assert family_names == ["Opus", "Sonnet"], f"expected [Opus, Sonnet], got {family_names}"
+
+    # Opus should use ONLY the claude-opus-4-6[1m] readings (2 readings, NOT 4)
+    opus_readings = selectable[0][1]
+    assert len(opus_readings) == 2, f"Opus must have 2 readings (latest variant only), got {len(opus_readings)}"
+    assert opus_readings[-1].session_5h_pct == 15.0, "latest reading should be 15% (from 1M variant)"
+
+    # The stale 'opus' ghost (80%) and older 'claude-opus-4-6' (60%) must NOT appear
+    all_pcts = [r.session_5h_pct for r in opus_readings]
+    assert 80.0 not in all_pcts, "stale 'opus' ghost reading must be excluded"
+    assert 60.0 not in all_pcts, "older 'claude-opus-4-6' reading must be excluded"
+
+    print("  ✓ test_aggregate_to_selectable_picks_latest_only")
+
+
+def test_merge_family_history_combines_all():
+    """Compare needs ALL variants' readings merged for accurate trend analysis.
+
+    Model renames shouldn't fragment trend data — the user was 'using Opus'
+    the whole time regardless of what Anthropic called the model.
+    """
+    from claude_code_vitals.__main__ import _merge_family_history, _group_by_family
+    from claude_code_vitals.logger import RateLimitSnapshot
+
+    def mk(model_id, model_name, ts, pct=50.0):
+        return RateLimitSnapshot(
+            ts=ts, provider="anthropic",
+            model_id=model_id, model_name=model_name,
+            session_5h_pct=pct, session_5h_reset=None,
+            weekly_7d_pct=40.0, weekly_7d_reset=None,
+            context_used_pct=None, context_window_size=None,
+        )
+
+    by_model = {
+        "opus":                [mk("opus", "Opus 4.6", "2026-04-01T10:00:00+00:00")],
+        "claude-opus-4-6[1m]": [
+            mk("claude-opus-4-6[1m]", "Opus 4.6 (1M context)", "2026-04-03T10:00:00+00:00"),
+            mk("claude-opus-4-6[1m]", "Opus 4.6 (1M context)", "2026-04-05T10:00:00+00:00"),
+        ],
+        "claude-sonnet-4-6": [mk("claude-sonnet-4-6", "Sonnet 4.6", "2026-04-05T10:00:00+00:00")],
+    }
+
+    families = _group_by_family(by_model)
+    merged = _merge_family_history(families)
+
+    family_names = [name for name, _ in merged]
+    assert family_names == ["Opus", "Sonnet"], f"got {family_names}"
+
+    # Opus should have ALL 3 readings merged (1 from 'opus' + 2 from '[1m]')
+    opus_readings = merged[0][1]
+    assert len(opus_readings) == 3, f"Opus must merge all 3 readings, got {len(opus_readings)}"
+
+    # Merged readings must be sorted by timestamp
+    timestamps = [r.ts for r in opus_readings]
+    assert timestamps == sorted(timestamps), "merged readings must be sorted by timestamp"
+
+    # Sonnet has 1 reading
+    assert len(merged[1][1]) == 1
+
+    print("  ✓ test_merge_family_history_combines_all")
 
 
 def test_init_upgrades_legacy_limitwatch_in_place():

@@ -128,6 +128,49 @@ def _group_by_family(by_model: dict) -> dict:
     return {k: v for k, v in families.items() if v}
 
 
+def _aggregate_to_selectable(families: dict) -> list[tuple[str, list]]:
+    """Pick the most-recent variant per family for actionable commands.
+
+    Does NOT merge readings across variants — old variants may represent
+    a different underlying model (Anthropic updates model names over time).
+    Uses only the variant with the latest timestamp within each family.
+    Returns [(family_name, readings_of_latest_variant), ...] in _FAMILY_ORDER.
+    """
+    result = []
+    for family_name in _FAMILY_ORDER:
+        if family_name not in families:
+            continue
+        best_variant = None
+        best_ts = ""
+        for label, model_id, readings in families[family_name]:
+            if readings and readings[-1].ts > best_ts:
+                best_ts = readings[-1].ts
+                best_variant = readings
+        if best_variant:
+            result.append((family_name, best_variant))
+    return result
+
+
+def _merge_family_history(families: dict) -> list[tuple[str, list]]:
+    """Merge ALL variants' readings within each family for historical trending.
+
+    Unlike _aggregate_to_selectable, this COMBINES readings across variants
+    because historical trend analysis should span model renames. If Anthropic
+    renamed 'opus' -> 'claude-opus-4-6[1m]', the user was still 'using Opus'.
+    Returns [(family_name, sorted_merged_readings), ...] in _FAMILY_ORDER.
+    """
+    result = []
+    for family_name in _FAMILY_ORDER:
+        if family_name not in families:
+            continue
+        all_readings = []
+        for label, model_id, readings in families[family_name]:
+            all_readings.extend(readings)
+        all_readings.sort(key=lambda r: r.ts)
+        result.append((family_name, all_readings))
+    return result
+
+
 # NOTE: superseded by _group_by_family; kept as safety fallback.
 # Remove in a later cleanup once we're confident all callers use grouping.
 def _dedupe_models(by_model: dict) -> dict:
@@ -510,41 +553,37 @@ def show_compare(config: Config, all_models: bool = False, session_mode: bool = 
         print(f"\n  \u26A1 ccvitals compare --all-models\n")
 
         families = _group_by_family(by_model)
+        merged = _merge_family_history(families)
         use_color = config.display.color
         all_above: list[str] = []  # collect "above baseline" rows across all families
 
-        for family_name in _FAMILY_ORDER:
-            if family_name not in families:
-                continue
-            header = f"{C.BOLD}{family_name}{C.RESET}" if use_color else family_name
-            print(f"  {header}")
-            for label, model_id, readings in families[family_name]:
-                buckets = _bucket_readings(readings, sid=current_sid)
-                week_rate, _ = _compute_period_stats(buckets["This week"][0])
-                hour_rate, _ = _compute_period_stats(buckets["This hour"][0])
+        for family_name, readings in merged:
+            buckets = _bucket_readings(readings, sid=current_sid)
+            week_rate, _ = _compute_period_stats(buckets["This week"][0])
+            hour_rate, _ = _compute_period_stats(buckets["This hour"][0])
 
-                multiplier = None
-                if hour_rate is not None:
-                    if week_rate and week_rate > 0:
-                        multiplier = hour_rate / week_rate
-                        mult_str = f"({multiplier:.1f}x your avg)"
-                    else:
-                        mult_str = "(no baseline)"
-                    rate_str = f"This hour: {hour_rate:.0f}%/hr {mult_str}"
+            multiplier = None
+            if hour_rate is not None:
+                if week_rate and week_rate > 0:
+                    multiplier = hour_rate / week_rate
+                    mult_str = f"({multiplier:.1f}x your avg)"
                 else:
-                    rate_str = "This hour: \u2014"
+                    mult_str = "(no baseline)"
+                rate_str = f"This hour: {hour_rate:.0f}%/hr {mult_str}"
+            else:
+                rate_str = "This hour: \u2014"
 
-                if multiplier is not None and multiplier > 1.2:
-                    status = "\u26A0 Above baseline"
-                    all_above.append(f"{family_name} {label}")
-                elif multiplier is not None and multiplier < 0.8:
-                    status = "\u2713 Below baseline"
-                else:
-                    status = "\u2713 Normal"
+            if multiplier is not None and multiplier > 1.2:
+                status = "\u26A0 Above baseline"
+                all_above.append(family_name)
+            elif multiplier is not None and multiplier < 0.8:
+                status = "\u2713 Below baseline"
+            else:
+                status = "\u2713 Normal"
 
-                indent_label = f"  {label}"
-                print(f"  {indent_label:<30} {rate_str:<35} {status}")
-            print()
+            print(f"  {family_name:<20} {rate_str:<35} {status}")
+
+        print()
 
         # Verdict
         if all_above:
@@ -818,7 +857,11 @@ def _get_current_session_id(config: Config) -> Optional[str]:
 
 
 def show_budget(config: Config):
-    """Show remaining session budget across all models."""
+    """Show remaining session budget per selectable model family.
+
+    One flat row per /model-selectable family (Opus / Sonnet / Haiku),
+    using only the most-recent variant's readings per family.
+    """
     from .logger import _parse_iso, load_history
     from collections import defaultdict
     from datetime import datetime, timezone
@@ -832,54 +875,46 @@ def show_budget(config: Config):
     for s in history:
         by_model[s.model_id].append(s)
     families = _group_by_family(by_model)
+    selectable = _aggregate_to_selectable(families)
 
     print("\n  \u26A1 ccvitals budget \u2014 Session capacity\n")
-    print(f"  {'Model':<25} {'Remaining':>10} {'Burn rate':>10} {'Time left':>10}")
-    print(f"  {'─'*25} {'─'*10} {'─'*10} {'─'*10}")
+    print(f"  {'Model':<15} {'Remaining':>10} {'Burn rate':>10} {'Time left':>10}")
+    print(f"  {'─'*15} {'─'*10} {'─'*10} {'─'*10}")
 
-    use_color = config.display.color
-    for family_name in _FAMILY_ORDER:
-        if family_name not in families:
+    for family_name, readings in selectable:
+        latest = readings[-1]
+        if latest.session_5h_pct is None:
             continue
-        header = f"{C.BOLD}{family_name}{C.RESET}" if use_color else family_name
-        print(f"\n  {header}")
-        for label, model_id, readings in families[family_name]:
-            latest = readings[-1]
-            if latest.session_5h_pct is None:
-                continue
 
-            remaining_pct = 100 - latest.session_5h_pct
+        remaining_pct = 100 - latest.session_5h_pct
 
-            burn_rate = None
-            valid = [r for r in readings if r.session_5h_pct is not None]
-            if len(valid) >= 2:
-                r1, r2 = valid[-2], valid[-1]
-                try:
-                    t1 = _parse_iso(r1.ts).replace(tzinfo=timezone.utc)
-                    t2 = _parse_iso(r2.ts).replace(tzinfo=timezone.utc)
-                    hrs = (t2 - t1).total_seconds() / 3600
-                    if 0.25 <= hrs <= 2:
-                        delta = r2.session_5h_pct - r1.session_5h_pct
-                        if delta > 0:
-                            burn_rate = delta / hrs
-                except (ValueError, TypeError):
-                    pass
+        burn_rate = None
+        valid = [r for r in readings if r.session_5h_pct is not None]
+        if len(valid) >= 2:
+            r1, r2 = valid[-2], valid[-1]
+            try:
+                t1 = _parse_iso(r1.ts).replace(tzinfo=timezone.utc)
+                t2 = _parse_iso(r2.ts).replace(tzinfo=timezone.utc)
+                hrs = (t2 - t1).total_seconds() / 3600
+                if 0.25 <= hrs <= 2:
+                    delta = r2.session_5h_pct - r1.session_5h_pct
+                    if delta > 0:
+                        burn_rate = delta / hrs
+            except (ValueError, TypeError):
+                pass
 
-            if burn_rate and burn_rate > 0:
-                hours_left = remaining_pct / burn_rate
-                time_str = f"~{int(hours_left * 60)}min" if hours_left < 1 else f"~{hours_left:.1f}hrs"
-                rate_str = f"{burn_rate:.0f}%/hr"
-            else:
-                time_str = "—"
-                rate_str = "—"
+        if burn_rate and burn_rate > 0:
+            hours_left = remaining_pct / burn_rate
+            time_str = f"~{int(hours_left * 60)}min" if hours_left < 1 else f"~{hours_left:.1f}hrs"
+            rate_str = f"{burn_rate:.0f}%/hr"
+        else:
+            time_str = "—"
+            rate_str = "—"
 
-            indent_label = f"  {label}"
-            print(f"  {indent_label:<25} {remaining_pct:.0f}% left{' ':>3} {rate_str:>10} {time_str:>10}")
+        print(f"  {family_name:<15} {remaining_pct:.0f}% left{' ':>3} {rate_str:>10} {time_str:>10}")
 
     print()
-    print("  Tip: Switch to a model with more budget to extend your session.")
-    print("  Run: ccvitals suggest  for model recommendations.")
-    print()
+    print("  Switch models with /model in Claude Code.")
 
 
 def _parse_pattern_hours(pattern: str) -> Optional[tuple[int, int]]:
@@ -999,7 +1034,11 @@ def _peak_overlap_tip(history: list) -> Optional[str]:
 
 
 def show_suggest(config: Config):
-    """Show all models ranked by remaining quota with burn rates."""
+    """Show selectable models ranked by remaining quota with burn rates.
+
+    One flat row per /model-selectable family (Opus / Sonnet / Haiku),
+    using only the most-recent variant's readings per family.
+    """
     from .logger import _parse_iso, load_history
     from collections import defaultdict
 
@@ -1012,38 +1051,29 @@ def show_suggest(config: Config):
     for s in history:
         by_model[s.model_id].append(s)
     families = _group_by_family(by_model)
+    selectable = _aggregate_to_selectable(families)
 
-    # Build rows per family: (family, label, 5h_left, 7d_left, burn_rate)
-    # Each raw identity variant gets its own row — no silent merging.
+    # Build rows: (family_name, 5h_left, 7d_left, burn_rate)
     all_rows = []
-    for family_name in _FAMILY_ORDER:
-        if family_name not in families:
-            continue
-        for label, model_id, model_readings in families[family_name]:
-            latest = model_readings[-1]
-            h5_left = round(100 - latest.session_5h_pct) if latest.session_5h_pct is not None else None
-            d7_left = round(100 - latest.weekly_7d_pct) if latest.weekly_7d_pct is not None else None
-            burn = _compute_burn_rate(model_readings)
-            all_rows.append((family_name, label, h5_left, d7_left, burn))
+    for family_name, readings in selectable:
+        latest = readings[-1]
+        h5_left = round(100 - latest.session_5h_pct) if latest.session_5h_pct is not None else None
+        d7_left = round(100 - latest.weekly_7d_pct) if latest.weekly_7d_pct is not None else None
+        burn = _compute_burn_rate(readings)
+        all_rows.append((family_name, h5_left, d7_left, burn))
 
-    # The overall "Best available" is the row with the highest 5h-left across all families.
+    # Best available = highest 5h-left across all families
     best_idx = max(
         range(len(all_rows)),
-        key=lambda i: all_rows[i][2] if all_rows[i][2] is not None else -1,
+        key=lambda i: all_rows[i][1] if all_rows[i][1] is not None else -1,
         default=None,
     ) if all_rows else None
 
     print("\n  \u26A1 ccvitals suggest \u2014 Model availability\n")
-    print(f"  {'Model':<25} {'5h left':>8} {'7d left':>8} {'Burn':>9}   {'Status'}")
-    print(f"  {'─'*25} {'─'*8} {'─'*8} {'─'*9}   {'─'*20}")
+    print(f"  {'Model':<15} {'5h left':>8} {'7d left':>8} {'Burn':>9}   {'Status'}")
+    print(f"  {'─'*15} {'─'*8} {'─'*8} {'─'*9}   {'─'*20}")
 
-    use_color = config.display.color
-    current_family = None
-    for i, (family, label, h5, d7, burn) in enumerate(all_rows):
-        if family != current_family:
-            header = f"{C.BOLD}{family}{C.RESET}" if use_color else family
-            print(f"\n  {header}")
-            current_family = family
+    for i, (family, h5, d7, burn) in enumerate(all_rows):
         h5_str = f"{h5}%" if h5 is not None else "?"
         d7_str = f"{d7}%" if d7 is not None else "?"
         burn_str = burn if burn is not None else "—"
@@ -1053,8 +1083,7 @@ def show_suggest(config: Config):
             status = "\u2713 Best available"
         else:
             status = "  Available"
-        indent_label = f"  {label}"  # indent under family header
-        print(f"  {indent_label:<25} {h5_str:>8} {d7_str:>8} {burn_str:>9}   {status}")
+        print(f"  {family:<15} {h5_str:>8} {d7_str:>8} {burn_str:>9}   {status}")
 
     print()
 
@@ -1063,6 +1092,8 @@ def show_suggest(config: Config):
     if tip:
         print(tip)
         print()
+
+    print("  Switch models with /model in Claude Code.")
 
 
 def show_status(config: Config, show_readings: bool = False,
@@ -1111,7 +1142,17 @@ def show_status(config: Config, show_readings: bool = False,
                 continue
             header = f"{C.BOLD}{family_name}{C.RESET}" if use_color else family_name
             print(f"\n{header}")
-            for label, model_id, model_history in families[family_name]:
+
+            # Determine the most-recent variant in this family for the active badge
+            members = families[family_name]
+            best_ts = ""
+            best_model_id = None
+            for _label, _mid, _readings in members:
+                if _readings and _readings[-1].ts > best_ts:
+                    best_ts = _readings[-1].ts
+                    best_model_id = _mid
+
+            for label, model_id, model_history in members:
                 latest = model_history[-1]
                 result = detect_drift(latest, config)
                 # Override model_name to the stripped member label so the row
@@ -1119,7 +1160,11 @@ def show_status(config: Config, show_readings: bool = False,
                 result.model_name = label
                 config.display.compact = True
                 line = render_compact(result, config)
-                print(f"  {line}")
+                if model_id == best_model_id:
+                    badge = f"{C.GREEN}\u25cf{C.RESET} " if use_color else "\u25cf "
+                else:
+                    badge = "  "
+                print(f"  {badge}{line}")
     else:
         # Single model — most recent reading
         latest = history[-1]

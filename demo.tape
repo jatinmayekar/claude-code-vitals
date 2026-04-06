@@ -11,7 +11,7 @@ Type "# claude-code-vitals — Know your limits before they know you."
 Enter
 Sleep 1s
 
-Type "pip install claude-code-vitals"
+Type "pipx install claude-code-vitals"
 Enter
 Sleep 2s
 
