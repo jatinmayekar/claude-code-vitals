@@ -567,7 +567,7 @@ def show_compare(config: Config, all_models: bool = False, session_mode: bool = 
         header += f"    Session: {current_sid[:8]}"
     print(f"{header}\n")
     print(f"  {'Period':<20} {'Burn rate':<14} {'Avg per prompt':<19} {'vs. your baseline'}")
-    print(f"  {'\u2500' * 20}    {'\u2500' * 10}    {'\u2500' * 14}     {'\u2500' * 17}")
+    print(f"  {'─' * 20}    {'─' * 10}    {'─' * 14}     {'─' * 17}")
 
     # Compute baseline from This week (always global)
     week_points, _ = buckets["This week"]
@@ -583,7 +583,7 @@ def show_compare(config: Config, all_models: bool = False, session_mode: bool = 
 
         period_label = f"{period} {label}"
         if rate is None:
-            print(f"  {period_label:<20} {'\u2014':<14} {'\u2014':<19} {'\u2014'}")
+            print(f"  {period_label:<20} {'—':<14} {'—':<19} {'—'}")
             continue
 
         rate_str = f"{rate:.0f}%/hr"
@@ -600,7 +600,7 @@ def show_compare(config: Config, all_models: bool = False, session_mode: bool = 
             else:
                 baseline_str = f"{mult:.1f}x (normal)"
         else:
-            baseline_str = "\u2014"
+            baseline_str = "—"
 
         print(f"  {period_label:<20} {rate_str:<14} {delta_str:<19} {baseline_str}")
 
@@ -663,7 +663,7 @@ def baseline_command(config: Config, args: list):
             print(f"  \u26A1 FROZEN \u2014 baselines are locked to a saved snapshot")
         print()
         print(f"  {'Model':<25} {'5h median':>10} {'7d median':>10} {'Points':>8} {'Oldest'}")
-        print(f"  {'\u2500' * 25} {'\u2500' * 10} {'\u2500' * 10} {'\u2500' * 8} {'\u2500' * 12}")
+        print(f"  {'─' * 25} {'─' * 10} {'─' * 10} {'─' * 8} {'─' * 12}")
 
         use_color = config.display.color
         for family_name in _FAMILY_ORDER:
@@ -675,8 +675,8 @@ def baseline_command(config: Config, args: list):
                 h5_vals = [r.session_5h_pct for r in readings if r.session_5h_pct is not None]
                 d7_vals = [r.weekly_7d_pct for r in readings if r.weekly_7d_pct is not None]
 
-                h5_med = f"{statistics.median(h5_vals):.1f}%" if h5_vals else "\u2014"
-                d7_med = f"{statistics.median(d7_vals):.1f}%" if d7_vals else "\u2014"
+                h5_med = f"{statistics.median(h5_vals):.1f}%" if h5_vals else "—"
+                d7_med = f"{statistics.median(d7_vals):.1f}%" if d7_vals else "—"
                 count = len(readings)
                 oldest = readings[0].ts[:10]
 
@@ -835,7 +835,7 @@ def show_budget(config: Config):
 
     print("\n  \u26A1 ccvitals budget \u2014 Session capacity\n")
     print(f"  {'Model':<25} {'Remaining':>10} {'Burn rate':>10} {'Time left':>10}")
-    print(f"  {'\u2500'*25} {'\u2500'*10} {'\u2500'*10} {'\u2500'*10}")
+    print(f"  {'─'*25} {'─'*10} {'─'*10} {'─'*10}")
 
     use_color = config.display.color
     for family_name in _FAMILY_ORDER:
@@ -870,8 +870,8 @@ def show_budget(config: Config):
                 time_str = f"~{int(hours_left * 60)}min" if hours_left < 1 else f"~{hours_left:.1f}hrs"
                 rate_str = f"{burn_rate:.0f}%/hr"
             else:
-                time_str = "\u2014"
-                rate_str = "\u2014"
+                time_str = "—"
+                rate_str = "—"
 
             indent_label = f"  {label}"
             print(f"  {indent_label:<25} {remaining_pct:.0f}% left{' ':>3} {rate_str:>10} {time_str:>10}")
@@ -1035,7 +1035,7 @@ def show_suggest(config: Config):
 
     print("\n  \u26A1 ccvitals suggest \u2014 Model availability\n")
     print(f"  {'Model':<25} {'5h left':>8} {'7d left':>8} {'Burn':>9}   {'Status'}")
-    print(f"  {'\u2500'*25} {'\u2500'*8} {'\u2500'*8} {'\u2500'*9}   {'\u2500'*20}")
+    print(f"  {'─'*25} {'─'*8} {'─'*8} {'─'*9}   {'─'*20}")
 
     use_color = config.display.color
     current_family = None
@@ -1046,7 +1046,7 @@ def show_suggest(config: Config):
             current_family = family
         h5_str = f"{h5}%" if h5 is not None else "?"
         d7_str = f"{d7}%" if d7 is not None else "?"
-        burn_str = burn if burn is not None else "\u2014"
+        burn_str = burn if burn is not None else "—"
         if h5 is not None and h5 < 30:
             status = "\u26A0 Running low"
         elif i == best_idx:

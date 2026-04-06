@@ -278,7 +278,7 @@ def render_expanded(result: DriftResult, config: Config) -> str:
     W = 40  # Inner width
 
     lines = []
-    lines.append(f"\u250C\u2500 claude_code_vitals {'\u2500' * (W - 13)}\u2510")
+    lines.append(f"\u250C\u2500 claude_code_vitals {'─' * (W - 13)}\u2510")
 
     # Status line
     status_text = f"{sig['icon']} {sig['label']}"
@@ -321,7 +321,7 @@ def render_expanded(result: DriftResult, config: Config) -> str:
     source = f"Local ({result.baseline_count} points)"
     lines.append(f"\u2502  {'Source:':<12}{source:<{W-14}}\u2502")
 
-    lines.append(f"\u2514{'\u2500' * (W - 1)}\u2518")
+    lines.append(f"\u2514{'─' * (W - 1)}\u2518")
 
     return "\n".join(lines)
 
