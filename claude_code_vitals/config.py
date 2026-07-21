@@ -37,6 +37,9 @@ class DisplayConfig:
     all_models: bool = False      # Show all models in status command
     show_cost: bool = False       # Show session cost in status bar
     show_personal_pattern: bool = False  # Opt-in: show learned heavy-usage window on Row 3
+    # "auto" (progressive disclosure — current default, shows when >50%),
+    # "always" (always render ctx: X% (Yk)), or "never" (fully suppressed)
+    show_context: str = "auto"
     color: bool = True
 
 
@@ -197,6 +200,10 @@ def load_config(data_dir: Path | None = None) -> Config:
             config.display.show_cost = bool(d["show_cost"])
         if "show_personal_pattern" in d:
             config.display.show_personal_pattern = bool(d["show_personal_pattern"])
+        if "show_context" in d:
+            raw_mode = str(d["show_context"]).strip().lower()
+            if raw_mode in ("auto", "always", "never"):
+                config.display.show_context = raw_mode
         if "color" in d:
             config.display.color = bool(d["color"])
 
@@ -237,6 +244,7 @@ show_readings = false          # Show readings count in status
 all_models = false             # Show all models in status command
 show_cost = false              # Show session cost ($) in status bar
 show_personal_pattern = false  # Show your personal heavy-usage window on Row 3 (learned from history)
+show_context = "auto"          # "auto" (>50% only), "always", or "never"
 color = true                   # ANSI color output
 """
     config.config_path.write_text(content)

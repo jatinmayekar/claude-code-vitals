@@ -110,6 +110,7 @@ class DetectorState:
     consecutive_spike: int = 0
     consecutive_drop: int = 0
     change_detected_at: Optional[str] = None
+    last_run_ts: Optional[str] = None  # Updated every detect_drift() call
 
     def to_dict(self) -> dict:
         return {
@@ -117,6 +118,7 @@ class DetectorState:
             "consecutive_spike": self.consecutive_spike,
             "consecutive_drop": self.consecutive_drop,
             "change_detected_at": self.change_detected_at,
+            "last_run_ts": self.last_run_ts,
         }
 
     @classmethod
@@ -130,6 +132,7 @@ class DetectorState:
             consecutive_spike=d.get("consecutive_spike", d.get("consecutive_down", 0)),
             consecutive_drop=d.get("consecutive_drop", d.get("consecutive_up", 0)),
             change_detected_at=d.get("change_detected_at"),
+            last_run_ts=d.get("last_run_ts"),
         )
 
 
@@ -323,7 +326,10 @@ def detect_drift(snapshot: Optional[RateLimitSnapshot], config: Config) -> Drift
 
     # Cache health (need previous snapshot from history)
     prev_snap = history[-1] if history else None
-    cache_info = compute_cache_health(snapshot, prev_snap)
+    cache_info = compute_cache_health(snapshot, prev_snap, last_run_ts=state.last_run_ts)
+
+    # Update last_run_ts AFTER cache health check (so it reflects the previous run)
+    state.last_run_ts = now
 
     # Save state
     save_state(state, config)
@@ -495,8 +501,14 @@ COMPACT_THRESHOLDS = {
 }
 
 def compute_cache_health(snapshot: Optional[RateLimitSnapshot],
-                         prev_snapshot: Optional[RateLimitSnapshot]) -> dict:
+                         prev_snapshot: Optional[RateLimitSnapshot],
+                         last_run_ts: Optional[str] = None) -> dict:
     """Analyze context window, compaction events, and cache efficiency.
+
+    Args:
+        last_run_ts: ISO timestamp of the previous detect_drift() call.
+            Used for idle detection instead of prev_snapshot.ts to avoid
+            debounce-inflated gaps from should_log().
 
     Returns dict with: context_pct, context_tokens, compact_threshold,
     compact_warning, cache_efficiency, cache_miss_detected, cache_miss_reason,
@@ -539,30 +551,34 @@ def compute_cache_health(snapshot: Optional[RateLimitSnapshot],
         if same_session and prev_snapshot.context_used_pct - ctx_pct > 30:
             auto_compacted = True
 
-    # Idle gap detection
+    # Idle gap detection — use last_run_ts (every invocation) instead of
+    # prev_snapshot.ts (only logged snapshots) to avoid debounce inflation.
+    # should_log() skips writes when values are unchanged, so prev_snapshot.ts
+    # can be 5+ minutes stale even during active use.
     idle_seconds = None
-    if prev_snapshot:
+    idle_ref_ts = last_run_ts or (prev_snapshot.ts if prev_snapshot else None)
+    if idle_ref_ts:
         try:
-            prev_ts = _parse_iso(prev_snapshot.ts)
+            ref_ts = _parse_iso(idle_ref_ts)
             curr_ts = _parse_iso(snapshot.ts)
-            if prev_ts.tzinfo is None:
-                prev_ts = prev_ts.replace(tzinfo=timezone.utc)
+            if ref_ts.tzinfo is None:
+                ref_ts = ref_ts.replace(tzinfo=timezone.utc)
             if curr_ts.tzinfo is None:
                 curr_ts = curr_ts.replace(tzinfo=timezone.utc)
-            idle_seconds = int((curr_ts - prev_ts).total_seconds())
+            idle_seconds = int((curr_ts - ref_ts).total_seconds())
         except (ValueError, TypeError):
             pass
 
     if idle_seconds is not None and idle_seconds > 300:
         result["idle_warning"] = (
-            f"Idle {idle_seconds // 60}min \u2014 cache expired (5min TTL). "
-            f"This prompt reprocesses full context."
+            f"Idle {idle_seconds // 60}min \u2014 cache was cold (5min TTL). "
+            f"Full context reprocessed."
         )
-    elif idle_seconds is not None and idle_seconds > 180:
-        remaining = 300 - idle_seconds
-        result["idle_warning"] = (
-            f"Cache expires in {remaining}s \u2014 send a prompt to keep it warm."
-        )
+    # NOTE: The 180-300s "send a prompt to keep it warm" warning was removed.
+    # ccvitals only runs when Claude Code pushes stdin (API response), so
+    # by the time this code executes a prompt was already processed and
+    # the cache timer was already reset.  The warning was structurally
+    # contradictory — it could never fire while the user was truly idle.
 
     # Cache efficiency from cumulative token diffs
     if (same_session and snapshot.cache_read_tokens is not None

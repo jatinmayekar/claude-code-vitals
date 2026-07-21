@@ -192,8 +192,17 @@ def render_compact(result: DriftResult, config: Config) -> str:
         else:
             row2_parts.append(result.compact_warning)
     else:
-        # Context: only show when >50% (approaching compact territory)
-        if result.context_pct is not None and result.context_pct > 50:
+        # Context: shown based on show_context mode.
+        #   "auto"   — progressive disclosure (> 50% only, approaching compact territory)
+        #   "always" — always render when a context value exists
+        #   "never"  — fully suppressed
+        ctx_mode = getattr(config.display, "show_context", "auto")
+        show_ctx = (
+            result.context_pct is not None
+            and ctx_mode != "never"
+            and (ctx_mode == "always" or result.context_pct > 50)
+        )
+        if show_ctx:
             tokens_str = ""
             if result.context_tokens is not None:
                 tokens_str = f" ({result.context_tokens // 1000}k)"

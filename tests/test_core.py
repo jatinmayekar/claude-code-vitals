@@ -814,6 +814,84 @@ def test_render_multirow_with_alerts_two_lines():
     print("  ✓ test_render_multirow_with_alerts_two_lines")
 
 
+# ===== show_context Config Tests =====
+
+def _make_ctx_result(ctx_pct: float):
+    """Minimal NORMAL DriftResult with a context value for context-render tests."""
+    from claude_code_vitals.detector import DriftResult
+    return DriftResult(
+        signal=Signal.NORMAL,
+        current_5h_pct=40.0,
+        current_7d_pct=50.0,
+        model_name="Opus 4.6",
+        context_pct=ctx_pct,
+        context_tokens=int(ctx_pct / 100 * 200_000),
+        baseline_count=50,
+    )
+
+
+def test_show_context_auto_below_50_hidden():
+    """Default auto mode: ctx at 30% should NOT render (below the 50% gate)."""
+    result = _make_ctx_result(30.0)
+    config = Config()
+    config.display.color = False
+    assert config.display.show_context == "auto"  # default
+    output = render_compact(result, config)
+    assert "ctx:" not in output, f"auto+30% should hide ctx, got: {output!r}"
+    print("  ✓ test_show_context_auto_below_50_hidden")
+
+
+def test_show_context_auto_above_50_shown():
+    """Default auto mode: ctx at 60% SHOULD render (above the 50% gate)."""
+    result = _make_ctx_result(60.0)
+    config = Config()
+    config.display.color = False
+    output = render_compact(result, config)
+    assert "ctx: 60%" in output, f"auto+60% should show ctx, got: {output!r}"
+    print("  ✓ test_show_context_auto_above_50_shown")
+
+
+def test_show_context_always_below_50_shown():
+    """always mode: ctx at 30% should render even below the 50% gate."""
+    result = _make_ctx_result(30.0)
+    config = Config()
+    config.display.color = False
+    config.display.show_context = "always"
+    output = render_compact(result, config)
+    assert "ctx: 30%" in output, f"always+30% should show ctx, got: {output!r}"
+    print("  ✓ test_show_context_always_below_50_shown")
+
+
+def test_show_context_never_above_50_hidden():
+    """never mode: ctx at 60% should be fully suppressed."""
+    result = _make_ctx_result(60.0)
+    config = Config()
+    config.display.color = False
+    config.display.show_context = "never"
+    output = render_compact(result, config)
+    assert "ctx:" not in output, f"never+60% should hide ctx, got: {output!r}"
+    print("  ✓ test_show_context_never_above_50_hidden")
+
+
+def test_show_context_config_parse():
+    """Config parser accepts auto/always/never; invalid values keep default."""
+    import tempfile, pathlib
+    from claude_code_vitals.config import load_config
+    for mode in ("auto", "always", "never"):
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = pathlib.Path(tmp)
+            (data_dir / "config.toml").write_text(f'[display]\nshow_context = "{mode}"\n')
+            loaded = load_config(data_dir=data_dir)
+            assert loaded.display.show_context == mode, f"{mode} failed"
+    # Invalid value falls back to default
+    with tempfile.TemporaryDirectory() as tmp:
+        data_dir = pathlib.Path(tmp)
+        (data_dir / "config.toml").write_text('[display]\nshow_context = "bogus"\n')
+        loaded = load_config(data_dir=data_dir)
+        assert loaded.display.show_context == "auto", "invalid should keep default"
+    print("  ✓ test_show_context_config_parse")
+
+
 # ===== Personal Peak Usage Tests =====
 
 def _make_pattern_history(hot_hours: set[int], days: int = 8, per_hour: int = 1):
@@ -993,6 +1071,13 @@ def run_all():
     print("\nMulti-Row:")
     test_render_multirow_normal_single_line()
     test_render_multirow_with_alerts_two_lines()
+
+    print("\nshow_context Config:")
+    test_show_context_auto_below_50_hidden()
+    test_show_context_auto_above_50_shown()
+    test_show_context_always_below_50_shown()
+    test_show_context_never_above_50_hidden()
+    test_show_context_config_parse()
 
     # ===== Personal Peak Usage Tests =====
     print("\nPersonal Peak Usage:")

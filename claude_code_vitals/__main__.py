@@ -70,7 +70,7 @@ def print_help():
 # `Opus 4.6 (1M)`). Instead of silently canonicalizing — which would hide a
 # real observability signal about API drift — we group rows under family
 # headers and show every raw variant as an indented member. Transparency is
-# the tool's core principle (see PRD §2, CLAUDE.md design decision #4).
+# the tool's core principle: never silently canonicalize observable data.
 
 _FAMILY_ORDER = ["Opus", "Sonnet", "Haiku", "Other"]
 
@@ -1234,6 +1234,10 @@ def config_command(config: Config, args: list):
                     except ValueError:
                         print(f"  Error: {key} must be a number, got '{value}'")
                         return
+                ENUM_KEYS = {"show_context": {"auto", "always", "never"}}
+                if key in ENUM_KEYS and value.strip('"').lower() not in ENUM_KEYS[key]:
+                    print(f"  Error: {key} must be one of {sorted(ENUM_KEYS[key])}, got '{value}'")
+                    return
                 lines[i] = f"{key} = {formatted}{' ' * max(0, 25 - len(key) - len(formatted))}{comment}"
                 found = True
                 break
@@ -1247,6 +1251,7 @@ def config_command(config: Config, args: list):
                 "show_source": "display", "show_remaining": "display",
                 "show_cost": "display",
                 "show_readings": "display", "all_models": "display",
+                "show_context": "display",
                 "color": "display",
             }
             section = section_map.get(key)
@@ -1273,8 +1278,14 @@ def config_command(config: Config, args: list):
                     except ValueError:
                         print(f"  Error: {key} must be a number, got '{value}'")
                         return
+                ENUM_KEYS = {"show_context": {"auto", "always", "never"}}
+                if key in ENUM_KEYS and value.strip('"').lower() not in ENUM_KEYS[key]:
+                    print(f"  Error: {key} must be one of {sorted(ENUM_KEYS[key])}, got '{value}'")
+                    return
                 if value.lower() in ("true", "false"):
                     formatted = value.lower()
+                elif key in ENUM_KEYS:
+                    formatted = f'"{value.strip(chr(34)).lower()}"'
                 else:
                     formatted = value
                 lines.insert(insert_at, f"{key} = {formatted}")
