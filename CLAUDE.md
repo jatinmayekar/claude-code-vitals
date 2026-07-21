@@ -84,7 +84,7 @@ Claude Code -> stdin JSON -> python3 -m claude_code_vitals run
 python3 tests/test_core.py
 
 # E2E pipeline test
-echo '{"model":{"id":"claude-opus-4-6","display_name":"Opus 4.6"},"rate_limits":{"session":{"used_percentage":42.0,"resets_at":"2026-03-30T19:00:00Z"},"weekly":{"used_percentage":67.0,"resets_at":"2026-04-05T08:00:00Z"}},"context_window":{"used_percentage":12,"context_window_size":200000},"cost":{"total_cost_usd":0.80}}' | python3 -m claude_code_vitals run
+echo '{"model":{"id":"claude-opus-4-6","display_name":"Opus 4.6"},"rate_limits":{"five_hour":{"used_percentage":42.0,"resets_at":1784516400},"seven_day":{"used_percentage":67.0,"resets_at":1784937600}},"context_window":{"used_percentage":12,"context_window_size":200000},"cost":{"total_cost_usd":0.80}}' | python3 -m claude_code_vitals run
 ```
 
 Rules:

@@ -82,12 +82,15 @@ def parse_statusline_json(raw: str) -> Optional[dict]:
     {
         "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
         "rate_limits": {
-            "session": {"used_percentage": 42, "resets_at": "..."},
-            "weekly": {"used_percentage": 67, "resets_at": "..."}
+            "five_hour": {"used_percentage": 42, "resets_at": 1784516400},
+            "seven_day": {"used_percentage": 67, "resets_at": 1784937600}
         },
         "context_window": {"used_percentage": 12, "context_window_size": 200000},
         "cost": {"total_cost_usd": 0.80}
     }
+
+    The legacy `session`/`weekly` keys with ISO-string `resets_at` are also
+    accepted for backward compatibility.
     """
     try:
         return json.loads(raw.strip())

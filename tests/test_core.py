@@ -56,8 +56,8 @@ color = false
 SAMPLE_STDIN_JSON = json.dumps({
     "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
     "rate_limits": {
-        "session": {"used_percentage": 42.0, "resets_at": "2026-03-30T19:00:00Z"},
-        "weekly": {"used_percentage": 67.0, "resets_at": "2026-04-05T08:00:00Z"},
+        "five_hour": {"used_percentage": 42.0, "resets_at": 1784516400},
+        "seven_day": {"used_percentage": 67.0, "resets_at": 1784937600},
     },
     "context_window": {"used_percentage": 12, "context_window_size": 200000},
     "cost": {"total_cost_usd": 0.80},
@@ -69,7 +69,7 @@ def test_parse_statusline_json():
     data = parse_statusline_json(SAMPLE_STDIN_JSON)
     assert data is not None
     assert data["model"]["id"] == "claude-opus-4-6"
-    assert data["rate_limits"]["session"]["used_percentage"] == 42.0
+    assert data["rate_limits"]["five_hour"]["used_percentage"] == 42.0
     print("  ✓ test_parse_statusline_json")
 
 
@@ -88,6 +88,7 @@ def test_extract_snapshot():
     assert snap.session_5h_pct == 42.0
     assert snap.weekly_7d_pct == 67.0
     assert snap.context_used_pct == 12
+    assert isinstance(snap.session_5h_reset, str) and snap.session_5h_reset.startswith("20")
     print("  ✓ test_extract_snapshot")
 
 
@@ -96,6 +97,24 @@ def test_extract_no_rate_limits():
     snap = extract_snapshot(data)
     assert snap is None  # No rate limit data = don't log
     print("  ✓ test_extract_no_rate_limits")
+
+
+def test_extract_snapshot_legacy_session_weekly():
+    """Backward-compat: the legacy session/weekly + ISO input still parses."""
+    data = {
+        "model": {"id": "claude-opus-4-6", "display_name": "Opus 4.6"},
+        "rate_limits": {
+            "session": {"used_percentage": 42.0, "resets_at": "2026-03-30T19:00:00Z"},
+            "weekly": {"used_percentage": 67.0, "resets_at": "2026-04-05T08:00:00Z"},
+        },
+        "context_window": {"used_percentage": 12, "context_window_size": 200000},
+        "cost": {"total_cost_usd": 0.80},
+    }
+    snap = extract_snapshot(data)
+    assert snap is not None
+    assert snap.session_5h_pct == 42.0
+    assert snap.weekly_7d_pct == 67.0
+    print("  ✓ test_extract_snapshot_legacy_session_weekly")
 
 
 def test_append_and_load():
@@ -1019,6 +1038,7 @@ def run_all():
     test_parse_invalid_json()
     test_extract_snapshot()
     test_extract_no_rate_limits()
+    test_extract_snapshot_legacy_session_weekly()
     test_append_and_load()
     test_json_line_compact()
 
