@@ -1,32 +1,25 @@
+# Render:  python3 demo-seed.py .demo-home && vhs demo.tape
+# Produces demo.gif from deterministic seeded data (no real usage / network).
 Output demo.gif
 
-Set Shell "bash"
+Set Shell "zsh"
 Set FontSize 16
-Set Width 900
-Set Height 500
+Set Width 1100
+Set Height 420
+Set Padding 24
 Set Theme "Catppuccin Mocha"
-Set Padding 20
+Set TypingSpeed 32ms
 
-Type "# claude-code-vitals — Know your limits before they know you."
-Enter
-Sleep 1s
+Hide
+Type "export HOME=$PWD/.demo-home" Enter
+Type "setopt interactive_comments" Enter
+Type "clear" Enter
+Show
 
-Type "pipx install claude-code-vitals"
-Enter
-Sleep 2s
-
-Type "ccvitals --version"
-Enter
-Sleep 1s
-
-Type "ccvitals status"
-Enter
-Sleep 3s
-
-Type "ccvitals suggest"
-Enter
-Sleep 3s
-
-Type "ccvitals -h"
-Enter
-Sleep 3s
+Sleep 700ms
+Type "# claude-code-vitals — know your limits before they know you" Enter
+Sleep 1200ms
+Type "ccvitals suggest" Enter
+Sleep 5500ms
+Type "clear && ccvitals budget" Enter
+Sleep 5500ms

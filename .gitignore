@@ -42,3 +42,5 @@ baseline-frozen.json
 
 # Claude Code worktrees
 .claude/worktrees/
+
+.demo-home/

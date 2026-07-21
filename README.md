@@ -2,6 +2,8 @@
 
 **Know your limits before they know you.**
 
+![demo](demo.gif)
+
 A passive, always-on rate limit monitor for Claude Code. Tracks drift, predicts depletion, detects cache resets, and tells you when to switch models. Zero token cost. Zero external dependencies.
 
 ```
