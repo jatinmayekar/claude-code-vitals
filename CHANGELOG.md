@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.3.0] — 2026-07-21
 ### Added
 - **Claude Fable 5 awareness.** Fable is now a recognized model family (was
   grouping as "Other" in status/suggest/budget/compare), gets a status-bar switch
