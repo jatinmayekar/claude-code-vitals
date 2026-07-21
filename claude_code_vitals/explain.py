@@ -144,13 +144,13 @@ def explain_models() -> str:
     return """
 \u26A1 claude_code_vitals explain models \u2014 Model Rate Limits
 
-  SEPARATE RATE LIMIT POOLS:
+  ONE SHARED WINDOW (NOT PER-MODEL POOLS):
 
-    Each model has its own independent 5-hour rate limit pool.
-    Switching models gives you a fresh budget window.
+    The 5-hour and 7-day windows are SHARED across all models (and across
+    Claude Code, chat, and Cowork). Switching models does NOT reset them.
 
-    Opus 4.6            \u2014 Highest quality, highest burn rate (~12-20%/hr)
-    Opus 4.6 (1M ctx)   \u2014 Separate pool from standard Opus
+    Opus 4.6            \u2014 Highest quality, burns the shared window fastest (~12-20%/hr)
+    Opus 4.6 (1M ctx)   \u2014 Same shared window; just a larger context size
     Sonnet 4.6          \u2014 Good quality, ~3-5%/hr burn rate
     Haiku 4.5           \u2014 Fastest, cheapest, ~1-2%/hr burn rate
 
@@ -160,18 +160,19 @@ def explain_models() -> str:
     For rate-limit-conscious users, using Sonnet for routine tasks and
     reserving Opus for complex work dramatically extends daily capacity.
 
-  THE 7-DAY POOL:
+  THE OPUS SUB-CAP:
 
-    The weekly (7-day) limit appears to be shared or correlated across
-    lighter models. Opus standard is the outlier with much higher 7d usage.
+    On top of the shared windows, Opus has its own tighter cap ("You've hit
+    your Opus limit"). Switching off Opus lets you keep working past THAT cap,
+    but it does not give you a fresh shared window.
 
   WHAT TO DO:
 
-    \u2022 Run: claude_code_vitals suggest  to see which model has the most room
+    \u2022 Run: claude_code_vitals suggest  to rank models by burn rate
     \u2022 When Opus is running low, switch to Sonnet \u2014 most coding tasks work fine
     \u2022 Use Haiku for simple queries, reviews, and explanations
-    \u2022 claude_code_vitals shows switch hints: "try Sonnet (96% left)"
-    \u2022 Run: claude_code_vitals budget  to see remaining hours per model
+    \u2022 claude_code_vitals shows switch hints: "try Sonnet (slower burn)"
+    \u2022 Run: claude_code_vitals budget  to see how long the shared window lasts
 """
 
 
@@ -195,7 +196,7 @@ def list_topics() -> str:
     claude_code_vitals explain cache    \u2014 How prompt caching works and why it matters
     claude_code_vitals explain compact  \u2014 Auto-compaction, when it triggers, cache impact
     claude_code_vitals explain peak     \u2014 Anthropic's peak hours (5am-11am PT)
-    claude_code_vitals explain models   \u2014 Model differences, burn rates, pool separation
+    claude_code_vitals explain models   \u2014 Model differences, burn rates, shared window
 
   Or just: claude_code_vitals explain   \u2014 Full status bar guide
 """

@@ -1102,6 +1102,13 @@ def run_all():
     test_init_upgrades_legacy_limitwatch_in_place()
     test_init_wraps_unrelated_third_party_statusline()
 
+    print("\nShared-Window Semantics:")
+    test_switch_hint_only_for_opus()
+    test_switch_hint_suppressed_for_non_opus()
+    test_burn_rate_value_positive_only()
+    test_suggest_ranks_by_burn_and_shared_window()
+    test_budget_shared_window_framing()
+
     print(f"\n🎉 All tests passed!\n")
 
 
@@ -1393,6 +1400,147 @@ def test_init_wraps_unrelated_third_party_statusline():
             pathlib.Path.home = real_home  # type: ignore
             init_cmd.CLAUDE_SETTINGS_PATH = original_path
     print("  ✓ test_init_wraps_unrelated_third_party_statusline")
+
+
+def test_switch_hint_only_for_opus():
+    """Switch hint fires for Opus and names a slower model — no fabricated '% left'.
+
+    The 5h/7d windows are shared, so there is no per-model balance to advertise;
+    the only actionable switch is off Opus (fastest burn + its own tighter cap).
+    """
+    from claude_code_vitals.__main__ import _compute_switch_hint
+    from claude_code_vitals.logger import RateLimitSnapshot
+
+    snap = RateLimitSnapshot(
+        ts="2026-04-05T10:00:00Z", provider="anthropic",
+        model_id="claude-opus-4-6", model_name="Opus 4.6",
+        session_5h_pct=85.0, session_5h_reset=None,
+        weekly_7d_pct=40.0, weekly_7d_reset=None,
+        context_used_pct=None, context_window_size=None,
+    )
+    hint = _compute_switch_hint(snap)
+    assert hint is not None, "Opus should get a switch hint"
+    assert "Sonnet" in hint, hint
+    low = hint.lower()
+    assert "% left" not in hint and "pool" not in low and "fresh" not in low, hint
+    print("  ✓ test_switch_hint_only_for_opus")
+
+
+def test_switch_hint_suppressed_for_non_opus():
+    """On Sonnet/Haiku a switch wouldn't extend the shared window — no hint."""
+    from claude_code_vitals.__main__ import _compute_switch_hint
+    from claude_code_vitals.logger import RateLimitSnapshot
+
+    def mk(model_id, model_name):
+        return RateLimitSnapshot(
+            ts="2026-04-05T10:00:00Z", provider="anthropic",
+            model_id=model_id, model_name=model_name,
+            session_5h_pct=85.0, session_5h_reset=None,
+            weekly_7d_pct=40.0, weekly_7d_reset=None,
+            context_used_pct=None, context_window_size=None,
+        )
+
+    assert _compute_switch_hint(mk("claude-sonnet-4-6", "Sonnet 4.6")) is None
+    assert _compute_switch_hint(mk("claude-haiku-4-5", "Haiku 4.5")) is None
+    print("  ✓ test_switch_hint_suppressed_for_non_opus")
+
+
+def test_burn_rate_value_positive_only():
+    """_burn_rate_value: %/hr for consumption; None on reset or too few readings."""
+    from claude_code_vitals.__main__ import _burn_rate_value
+    from claude_code_vitals.logger import RateLimitSnapshot
+
+    def mk(ts, pct):
+        return RateLimitSnapshot(
+            ts=ts, provider="anthropic",
+            model_id="claude-opus-4-6", model_name="Opus 4.6",
+            session_5h_pct=pct, session_5h_reset=None,
+            weekly_7d_pct=None, weekly_7d_reset=None,
+            context_used_pct=None, context_window_size=None,
+        )
+
+    readings = [mk("2026-04-05T10:00:00Z", 30.0), mk("2026-04-05T11:00:00Z", 50.0)]
+    v = _burn_rate_value(readings)
+    assert v is not None and abs(v - 20.0) < 0.01, v          # 20% over 1hr
+    # A drop means the window reset, not burn → None (not an abs() positive)
+    assert _burn_rate_value([mk("2026-04-05T10:00:00Z", 80.0),
+                             mk("2026-04-05T11:00:00Z", 5.0)]) is None
+    assert _burn_rate_value(readings[:1]) is None             # <2 readings
+    print("  ✓ test_burn_rate_value_positive_only")
+
+
+def _iso_now(offset_min):
+    dt = datetime.now(timezone.utc) + timedelta(minutes=offset_min)
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def test_suggest_ranks_by_burn_and_shared_window():
+    """suggest: one shared window %, ranked slowest-burn first, no per-model balance columns."""
+    import io, contextlib
+    from claude_code_vitals.__main__ import show_suggest
+    from claude_code_vitals.logger import RateLimitSnapshot, append_snapshot
+
+    def mk(mid, name, ts, pct):
+        return RateLimitSnapshot(
+            ts=ts, provider="anthropic", model_id=mid, model_name=name,
+            session_5h_pct=pct, session_5h_reset=None,
+            weekly_7d_pct=40.0, weekly_7d_reset=None,
+            context_used_pct=None, context_window_size=None,
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        config = make_config(Path(tmp))
+        # Opus burns fast (10% / 30min = 20%/hr); Sonnet slow (3% / 30min = 6%/hr).
+        for s in [
+            mk("claude-opus-4-6", "Opus 4.6", _iso_now(-40), 40.0),
+            mk("claude-sonnet-4-6", "Sonnet 4.6", _iso_now(-38), 60.0),
+            mk("claude-opus-4-6", "Opus 4.6", _iso_now(-10), 50.0),
+            mk("claude-sonnet-4-6", "Sonnet 4.6", _iso_now(-8), 63.0),
+        ]:
+            append_snapshot(s, config)
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            show_suggest(config)
+        out = buf.getvalue()
+
+    assert "Shared 5h window" in out and "one pool" in out, out
+    assert out.index("Sonnet") < out.index("Opus"), "slower-burning Sonnet must rank first"
+    assert "Extends longest" in out and "Fast burn" in out, out
+    assert "5h left" not in out and "7d left" not in out, "per-model balance columns must be gone"
+    print("  ✓ test_suggest_ranks_by_burn_and_shared_window")
+
+
+def test_budget_shared_window_framing():
+    """budget: one shared remaining %, per-model time-to-depletion, no per-model balance column."""
+    import io, contextlib
+    from claude_code_vitals.__main__ import show_budget
+    from claude_code_vitals.logger import RateLimitSnapshot, append_snapshot
+
+    def mk(mid, name, ts, pct):
+        return RateLimitSnapshot(
+            ts=ts, provider="anthropic", model_id=mid, model_name=name,
+            session_5h_pct=pct, session_5h_reset=None,
+            weekly_7d_pct=None, weekly_7d_reset=None,
+            context_used_pct=None, context_window_size=None,
+        )
+
+    with tempfile.TemporaryDirectory() as tmp:
+        config = make_config(Path(tmp))
+        for s in [mk("claude-opus-4-6", "Opus 4.6", _iso_now(-40), 40.0),
+                  mk("claude-opus-4-6", "Opus 4.6", _iso_now(-10), 52.0)]:
+            append_snapshot(s, config)
+
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            show_budget(config)
+        out = buf.getvalue()
+
+    assert "Shared session capacity" in out, out
+    assert "Shared 5h window" in out and "one pool" in out, out
+    assert "Window lasts" in out, "reframed time-to-depletion column"
+    assert "Remaining" not in out, "old per-model balance column must be gone"
+    print("  ✓ test_budget_shared_window_framing")
 
 
 if __name__ == "__main__":

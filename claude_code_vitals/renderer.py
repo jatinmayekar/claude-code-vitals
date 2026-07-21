@@ -55,7 +55,7 @@ def render_compact(result: DriftResult, config: Config) -> str:
     Normal (clean, 4 elements):
         Opus 4.6  |  5h: 87% left  |  7d: 84% left  |  resets 2h 17m
     Running low (alerts expand):
-        Opus 4.6  |  5h: 25% left  |  7d: 12% left  |  runs out 45m  |  try Sonnet (96% left)
+        Opus 4.6  |  5h: 25% left  |  7d: 12% left  |  runs out 45m  |  try Sonnet (slower burn)
     Cache problem:
         Opus 4.6  |  5h: 87% left  |  7d: 84% left  |  Cache: 34%  |  ⚠ CACHE MISS — idle 6min
     Usage spike:

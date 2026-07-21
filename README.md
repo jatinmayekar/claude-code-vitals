@@ -4,7 +4,9 @@
 
 A passive, always-on rate limit monitor for Claude Code. Tracks drift, predicts depletion, detects cache resets, and tells you when to switch models. Zero token cost. Zero external dependencies.
 
-![demo](demo.gif)
+```
+Opus 4.6 (1M context)  |  5h: 87% left  |  7d: 84% left  |  resets 2h 17m
+```
 
 Percentages are color-coded: **green** (<50% used), **yellow** (50-80%), **red** (>80%).
 
@@ -45,7 +47,7 @@ Opus 4.6  |  5h: 87% left  |  7d: 84% left  |  resets 2h 17m
 ### Running low (two rows)
 ```
 Opus 4.6  |  5h: 25% left  |  7d: 12% left  |  resets 1h 20m
-  runs out 45m  |  try Sonnet (96% left)
+  runs out 45m  |  try Sonnet (slower burn)
 ```
 
 ### Usage spike (two rows)
@@ -110,10 +112,10 @@ This is how claude-code-vitals separates a ceiling shift from a behavior change 
 ### Rate Limit Intelligence
 - **Drift detection** -- rolling median baseline comparison with attribution ("you're using more" vs. "baseline shift")
 - **Four signals** -- USAGE SPIKE (yellow), USAGE DROP (blue), COLLECTING (building baseline), STABLE (hidden)
-- **Per-model tracking** -- each model (Opus, Sonnet, Haiku) has its own independent rate limit pool
+- **Per-model burn-rate tracking** -- the 5h/7d windows are shared across all models; each model's burn rate against that shared window is tracked separately (Opus drains it ~3-5x faster than Sonnet)
 - **Burn rate + depletion prediction** -- "runs out 45m" based on your current consumption rate (red <60min, yellow <5hr)
 - **Hourly comparison** -- "3.2x avg" shown when burning >1.5x faster than your 7-day hourly median
-- **Model switch suggestions** -- "try Sonnet (96% left)" when your current model is >70% used
+- **Model switch suggestions** -- "try Sonnet (slower burn)" when you're on Opus and the shared window is >70% used
 - **Reset countdown** -- time until your 5-hour window resets
 
 ### Per-Prompt Delta
@@ -237,7 +239,7 @@ Claude Code -> stdin JSON -> ccvitals
 
 Things we learned by watching the data that Anthropic doesn't document:
 
-- **Separate rate limit pools** -- each model has its own independent rate limit pool. Switching models gives you a fresh 5-hour window.
+- **Shared window, per-model burn rate** -- the 5h and 7d windows are shared across all models (and across Claude Code, chat, and Cowork); switching models does *not* reset them. But Opus burns the shared window ~3-5x faster and has its own tighter cap, so switching to a lighter model extends how long the window lasts and lets you keep working past the Opus limit.
 - **Opus costs 3-5x more** -- Opus consumes roughly 3-5x more rate limit budget per request than Sonnet.
 - **5-minute cache TTL** -- prompt cache entries expire after 5 minutes of inactivity. Taking a break costs money on your next prompt.
 - **Auto-compact resets cache** -- when Claude Code auto-compacts your context, the entire cache chain resets. The first prompt after compaction is expensive.
@@ -268,7 +270,7 @@ Future versions may add opt-in anonymous crowdsourcing (utilization percentages 
 ## Roadmap
 
 - [x] Phase 1: Local monitoring + drift detection with attribution
-- [x] Per-model tracking (Opus, Sonnet, Haiku tracked independently)
+- [x] Per-model burn-rate tracking (Opus, Sonnet, Haiku burn rates tracked separately)
 - [x] Reset countdown + color-coded thresholds
 - [x] CLI config management (`config set/list`)
 - [x] Session cost display

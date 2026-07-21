@@ -346,71 +346,51 @@ def run_statusline(config: Config, log_only: bool = False, debug: bool = False):
     # Detect drift
     result = detect_drift(snapshot, config)
 
-    # Switch hint — when current model >70% used, suggest the best alternative
+    # Switch hint — when the shared 5h window is >70% used and you're on a
+    # fast-burning model (Opus), suggest a lighter model to extend the window.
     if snapshot is not None and snapshot.session_5h_pct is not None and snapshot.session_5h_pct > 70:
-        result.switch_hint = _compute_switch_hint(snapshot, config)
+        result.switch_hint = _compute_switch_hint(snapshot)
 
     # Render and output
     output = render(result, config)
     print(output)
 
 
-def _compute_switch_hint(current_snapshot, config: Config) -> Optional[str]:
-    """Find the best alternative model when current model is running low."""
-    from .logger import _parse_iso, load_history
-    from collections import defaultdict
+def _compute_switch_hint(current_snapshot) -> Optional[str]:
+    """Suggest switching off Opus when the shared 5h window is running low.
 
-    history = load_history(config, max_age_days=1)
-    if not history:
+    The 5h/7d windows are shared across all models, so switching does not reset
+    them and there is no separate per-model balance to compare. But Opus burns
+    the shared window ~3-5x faster than Sonnet and carries its own tighter cap,
+    so a switch is only actionable when the current model is Opus — on
+    Sonnet/Haiku a switch wouldn't extend the window. Needs no cross-model
+    history: the "slower burn" claim is model-intrinsic.
+    """
+    family = _detect_family(current_snapshot.model_id, current_snapshot.model_name or "")
+    if family != "Opus":
         return None
-
-    # Get latest reading per model (excluding current)
-    by_model = defaultdict(list)
-    for s in history:
-        if s.model_id != current_snapshot.model_id:
-            by_model[s.model_id].append(s)
-
-    if not by_model:
-        return None
-
-    # Find model with most 5h remaining
-    best_model = None
-    best_remaining = 0
-    for model_id, readings in by_model.items():
-        latest = readings[-1]
-        if latest.session_5h_pct is not None:
-            remaining = 100 - latest.session_5h_pct
-            if remaining > best_remaining:
-                best_remaining = remaining
-                best_model = latest
-
-    if best_model and best_remaining > 50:
-        return f"try {best_model.model_name} ({round(best_remaining)}% left)"
-    return None
+    return "try Sonnet (slower burn)"
 
 
-def _compute_burn_rate(readings: list) -> Optional[str]:
-    """Compute per-model burn rate from the last 2 readings within 2 hours.
+def _burn_rate_value(readings: list) -> Optional[float]:
+    """Per-model burn rate (%/hr of the shared 5h window) from the last 2 readings.
+
+    The 5h window is shared across models; this measures how fast this model
+    drains it. Only positive consumption counts — a drop means the window reset,
+    not burn.
 
     Args:
-        readings: List of RateLimitSnapshot for a single model, sorted by time.
+        readings: RateLimitSnapshot list for a single model, sorted by time.
 
     Returns:
-        Burn rate string like "3%/hr", or None if not enough data.
+        Burn rate in percent-per-hour, or None if there aren't two readings
+        with 5h data 15min-2hr apart consuming the window.
     """
-    from datetime import datetime, timezone
-
-    if len(readings) < 2:
-        return None
-
-    # Take last two readings that have 5h pct data
     valid = [r for r in readings if r.session_5h_pct is not None]
     if len(valid) < 2:
         return None
 
-    r1 = valid[-2]
-    r2 = valid[-1]
-
+    r1, r2 = valid[-2], valid[-1]
     try:
         t1 = _parse_iso(r1.ts)
         t2 = _parse_iso(r2.ts)
@@ -422,8 +402,27 @@ def _compute_burn_rate(readings: list) -> Optional[str]:
         return None
 
     delta = r2.session_5h_pct - r1.session_5h_pct
-    rate = abs(delta) / hours_elapsed
-    return f"{round(rate)}%/hr"
+    if delta <= 0:
+        return None
+    return delta / hours_elapsed
+
+
+def _compute_burn_rate(readings: list) -> Optional[str]:
+    """Format the per-model burn rate as a string like '3%/hr', or None."""
+    v = _burn_rate_value(readings)
+    return f"{round(v)}%/hr" if v is not None else None
+
+
+def _shared_remaining_5h(history: list) -> Optional[int]:
+    """Remaining % of the shared 5h window from the latest reading of any model.
+
+    The 5h window is one shared pool, so the most recent reading across all
+    models is the current remaining headroom for every model.
+    """
+    for s in reversed(history):
+        if s.session_5h_pct is not None:
+            return round(100 - s.session_5h_pct)
+    return None
 
 
 def show_compare(config: Config, all_models: bool = False, session_mode: bool = True):
@@ -857,14 +856,14 @@ def _get_current_session_id(config: Config) -> Optional[str]:
 
 
 def show_budget(config: Config):
-    """Show remaining session budget per selectable model family.
+    """Show how long the shared 5h window lasts at each model's burn rate.
 
-    One flat row per /model-selectable family (Opus / Sonnet / Haiku),
-    using only the most-recent variant's readings per family.
+    The 5h window is a single pool shared across all models, so there is one
+    remaining %. Models differ only in how fast they drain it, so the per-model
+    figure is time-to-depletion at that burn rate, not an independent balance.
     """
-    from .logger import _parse_iso, load_history
+    from .logger import load_history
     from collections import defaultdict
-    from datetime import datetime, timezone
 
     history = load_history(config, max_age_days=1)
     if not history:
@@ -877,43 +876,26 @@ def show_budget(config: Config):
     families = _group_by_family(by_model)
     selectable = _aggregate_to_selectable(families)
 
-    print("\n  \u26A1 ccvitals budget \u2014 Session capacity\n")
-    print(f"  {'Model':<15} {'Remaining':>10} {'Burn rate':>10} {'Time left':>10}")
-    print(f"  {'─'*15} {'─'*10} {'─'*10} {'─'*10}")
+    print("\n  \u26A1 ccvitals budget \u2014 Shared session capacity\n")
+    shared_remaining = _shared_remaining_5h(history)
+    if shared_remaining is not None:
+        print(f"  Shared 5h window: {shared_remaining}% left  (all models draw from this one pool)\n")
+    print(f"  {'Model':<15} {'Burn rate':>10} {'Window lasts':>14}")
+    print(f"  {'─'*15} {'─'*10} {'─'*14}")
 
     for family_name, readings in selectable:
-        latest = readings[-1]
-        if latest.session_5h_pct is None:
-            continue
-
-        remaining_pct = 100 - latest.session_5h_pct
-
-        burn_rate = None
-        valid = [r for r in readings if r.session_5h_pct is not None]
-        if len(valid) >= 2:
-            r1, r2 = valid[-2], valid[-1]
-            try:
-                t1 = _parse_iso(r1.ts).replace(tzinfo=timezone.utc)
-                t2 = _parse_iso(r2.ts).replace(tzinfo=timezone.utc)
-                hrs = (t2 - t1).total_seconds() / 3600
-                if 0.25 <= hrs <= 2:
-                    delta = r2.session_5h_pct - r1.session_5h_pct
-                    if delta > 0:
-                        burn_rate = delta / hrs
-            except (ValueError, TypeError):
-                pass
-
-        if burn_rate and burn_rate > 0:
-            hours_left = remaining_pct / burn_rate
+        burn = _burn_rate_value(readings)
+        if burn and shared_remaining is not None:
+            hours_left = shared_remaining / burn
             time_str = f"~{int(hours_left * 60)}min" if hours_left < 1 else f"~{hours_left:.1f}hrs"
-            rate_str = f"{burn_rate:.0f}%/hr"
+            rate_str = f"{burn:.0f}%/hr"
         else:
             time_str = "—"
             rate_str = "—"
-
-        print(f"  {family_name:<15} {remaining_pct:.0f}% left{' ':>3} {rate_str:>10} {time_str:>10}")
+        print(f"  {family_name:<15} {rate_str:>10} {time_str:>14}")
 
     print()
+    print("  Opus also has its own tighter cap; switching off Opus lets you work past it.")
     print("  Switch models with /model in Claude Code.")
 
 
@@ -1034,12 +1016,14 @@ def _peak_overlap_tip(history: list) -> Optional[str]:
 
 
 def show_suggest(config: Config):
-    """Show selectable models ranked by remaining quota with burn rates.
+    """Rank selectable models by burn rate against the shared 5h window.
 
-    One flat row per /model-selectable family (Opus / Sonnet / Haiku),
-    using only the most-recent variant's readings per family.
+    The 5h/7d windows are shared across all models, so there is one remaining %
+    for everyone. Models differ by burn rate — a slower-burning model makes the
+    shared window last longer. Ranked slowest-burn first; the shared window is
+    shown once, not as a per-model balance.
     """
-    from .logger import _parse_iso, load_history
+    from .logger import load_history
     from collections import defaultdict
 
     history = load_history(config, max_age_days=1)
@@ -1047,43 +1031,46 @@ def show_suggest(config: Config):
         print("  No data yet. Use Claude Code to collect readings.")
         return
 
+    shared_remaining = _shared_remaining_5h(history)
+
     by_model = defaultdict(list)
     for s in history:
         by_model[s.model_id].append(s)
     families = _group_by_family(by_model)
     selectable = _aggregate_to_selectable(families)
 
-    # Build rows: (family_name, 5h_left, 7d_left, burn_rate)
-    all_rows = []
+    # Rank by burn rate ascending — a slower-burning model extends the shared
+    # window longest. Models with no recent burn data sort last.
+    rows = []  # (family_name, burn_value_or_None)
     for family_name, readings in selectable:
-        latest = readings[-1]
-        h5_left = round(100 - latest.session_5h_pct) if latest.session_5h_pct is not None else None
-        d7_left = round(100 - latest.weekly_7d_pct) if latest.weekly_7d_pct is not None else None
-        burn = _compute_burn_rate(readings)
-        all_rows.append((family_name, h5_left, d7_left, burn))
-
-    # Best available = highest 5h-left across all families
-    best_idx = max(
-        range(len(all_rows)),
-        key=lambda i: all_rows[i][1] if all_rows[i][1] is not None else -1,
-        default=None,
-    ) if all_rows else None
+        rows.append((family_name, _burn_rate_value(readings)))
+    rows.sort(key=lambda r: (r[1] is None, r[1] if r[1] is not None else 0.0))
+    ranked_burns = [b for _, b in rows if b is not None]
+    max_burn = max(ranked_burns) if ranked_burns else None
 
     print("\n  \u26A1 ccvitals suggest \u2014 Model availability\n")
-    print(f"  {'Model':<15} {'5h left':>8} {'7d left':>8} {'Burn':>9}   {'Status'}")
-    print(f"  {'─'*15} {'─'*8} {'─'*8} {'─'*9}   {'─'*20}")
+    if shared_remaining is not None:
+        print(f"  Shared 5h window: {shared_remaining}% left  (one pool \u2014 every model draws from it)")
+    print("  Ranked by burn rate \u2014 slower models make this window last longer.\n")
+    print(f"  {'Model':<15} {'Burn':>9} {'Window lasts':>14}   {'Status'}")
+    print(f"  {'─'*15} {'─'*9} {'─'*14}   {'─'*20}")
 
-    for i, (family, h5, d7, burn) in enumerate(all_rows):
-        h5_str = f"{h5}%" if h5 is not None else "?"
-        d7_str = f"{d7}%" if d7 is not None else "?"
-        burn_str = burn if burn is not None else "—"
-        if h5 is not None and h5 < 30:
-            status = "\u26A0 Running low"
-        elif i == best_idx:
-            status = "\u2713 Best available"
+    for i, (family, burn) in enumerate(rows):
+        burn_str = f"{round(burn)}%/hr" if burn is not None else "—"
+        if burn is not None and shared_remaining is not None:
+            hours_left = shared_remaining / burn
+            lasts = f"~{int(hours_left * 60)}min" if hours_left < 1 else f"~{hours_left:.1f}hrs"
+        else:
+            lasts = "—"
+        if burn is None:
+            status = "no burn data yet"
+        elif i == 0:
+            status = "\u2713 Extends longest"
+        elif burn == max_burn:
+            status = "\u26A0 Fast burn"
         else:
             status = "  Available"
-        print(f"  {family:<15} {h5_str:>8} {d7_str:>8} {burn_str:>9}   {status}")
+        print(f"  {family:<15} {burn_str:>9} {lasts:>14}   {status}")
 
     print()
 
@@ -1093,6 +1080,7 @@ def show_suggest(config: Config):
         print(tip)
         print()
 
+    print("  Opus also has its own tighter cap; switching off Opus keeps you working past it.")
     print("  Switch models with /model in Claude Code.")
 
 
@@ -1467,7 +1455,7 @@ def show_explain():
 
   EXAMPLE (running low \u2014 switch hint appears):
 
-    Opus 4.6  |  5h: 25% left  |  7d: 12% left  |  $5.00  |  resets 1h 20m  |  try Sonnet (96% left)
+    Opus 4.6  |  5h: 25% left  |  7d: 12% left  |  $5.00  |  resets 1h 20m  |  try Sonnet (slower burn)
 
   EXAMPLE (usage spike detected \u2014 alert with attribution):
 
@@ -1532,9 +1520,11 @@ def show_explain():
 
   SWITCH HINTS:
 
-    try Sonnet (96% left) \u2014 Appears when your current model is >70% used.
-                            Each model has its own separate rate limit pool.
-                            Switching gives you a fresh quota window.
+    try Sonnet (slower burn) \u2014 Appears when you're on Opus and the shared 5h
+                            window is >70% used. The 5h/7d windows are SHARED
+                            across all models, so switching doesn't reset them \u2014
+                            but Opus burns the shared window ~3-5x faster and has
+                            its own tighter cap, so a lighter model extends it.
 
     For a full comparison: ! ccvitals suggest
 
@@ -1572,7 +1562,7 @@ def show_explain():
 
     ccvitals status               \u2014 Full drift analysis
     ccvitals status --all-models  \u2014 Compare all models at once
-    ccvitals suggest              \u2014 Which model should I switch to?
+    ccvitals suggest              \u2014 Which model burns slowest (extends the window)?
     ccvitals config list          \u2014 See all current settings
     ccvitals config set <k> <v>   \u2014 Change any setting
 

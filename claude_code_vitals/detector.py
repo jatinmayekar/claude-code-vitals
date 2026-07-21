@@ -92,7 +92,8 @@ class DriftResult:
     # Hourly comparison
     hourly_multiplier: Optional[float] = None  # e.g., 3.2 = burning 3.2x avg          # warning when cache expired from idle
 
-    # Switch suggestion (e.g. "try Sonnet (96% left)")
+    # Switch suggestion (e.g. "try Sonnet (slower burn)") — surfaced when on a
+    # fast-burning model (Opus) and the shared window is running low.
     switch_hint: Optional[str] = None
 
     # Data source
@@ -167,7 +168,12 @@ def detect_drift(snapshot: Optional[RateLimitSnapshot], config: Config) -> Drift
     # Load history
     history = load_history(config, max_age_days=window_days)
 
-    # Filter to current model — each model has its own separate rate limit pool
+    # Filter to the current model. The 5h/7d windows are SHARED across all
+    # models (and across Claude Code / chat / web) — switching models does not
+    # reset them. But burn rate and baseline are per-model: Opus drains the
+    # shared window ~3-5x faster than Sonnet, so deltas are only comparable
+    # within one model's readings. This filter attributes drift to the active
+    # model; it does not imply separate pools.
     if snapshot is not None:
         history = [s for s in history if s.model_id == snapshot.model_id]
 

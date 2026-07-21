@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+### Fixed
+- **Rate-limit model corrected.** The 5-hour and 7-day windows are SHARED across
+  all models (and across Claude Code, chat, and Cowork) — switching models does
+  not reset them. Earlier copy claimed each model had its own independent pool
+  and that switching gave a "fresh window"; this contradicted official Claude
+  Code docs. Corrected README, `explain models`, and CLI help.
+- **`suggest` / `budget` / switch-hint reframed around burn rate.** These now
+  show the one shared remaining % once and rank models by burn rate (slower =
+  extends the shared window longer), instead of treating each model's % as an
+  independent balance. The status-bar switch hint (`try Sonnet (slower burn)`)
+  now fires only when you're on Opus, since only switching off Opus extends the
+  shared window / bypasses the Opus-specific cap.
+
 ## [0.2.0] — 2026-04-05
 ### Renamed + rebranded
 - Package: `limitwatch` → `claude-code-vitals`
