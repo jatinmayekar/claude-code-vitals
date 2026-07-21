@@ -1,6 +1,7 @@
-# Render:  python3 demo-seed.py .demo-home && vhs demo.tape
-# Produces demo.gif from deterministic seeded data (no real usage / network).
-Output demo.gif
+# Render (from repo root):
+#   python3 videos/demo-seed.py .demo-home && vhs videos/demo.tape
+# Produces videos/demo.gif from deterministic seeded data (no real usage / network).
+Output videos/demo.gif
 
 Set Shell "zsh"
 Set FontSize 16
