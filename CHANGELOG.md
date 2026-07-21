@@ -1,6 +1,15 @@
 # Changelog
 
 ## [Unreleased]
+### Added
+- **Claude Fable 5 awareness.** Fable is now a recognized model family (was
+  grouping as "Other" in status/suggest/budget/compare), gets a status-bar switch
+  hint as a heavy burner (previously only Opus did), and has its own compaction
+  threshold. `explain models` now documents the Fable sub-cap alongside Opus, and
+  a README "Where did my usage go?" FAQ explains the six observable causes of
+  usage drain. All plan/pricing specifics are intentionally left out — ccvitals
+  reports only what it observes and links to Anthropic's pricing for eligibility.
+
 ### Fixed
 - **`explain` used the wrong command name.** The `ccvitals explain` pages
   printed `claude_code_vitals` (the Python module) instead of `ccvitals` (the

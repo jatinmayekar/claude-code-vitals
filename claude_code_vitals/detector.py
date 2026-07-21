@@ -501,6 +501,7 @@ def detect_peak_status(snapshot_ts: str) -> tuple[bool, Optional[int]]:
 
 
 COMPACT_THRESHOLDS = {
+    "fable": 75,
     "opus": 75,
     "sonnet": 85,
     "haiku": 90,

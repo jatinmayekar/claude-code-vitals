@@ -149,27 +149,31 @@ def explain_models() -> str:
     The 5-hour and 7-day windows are SHARED across all models (and across
     Claude Code, chat, and Cowork). Switching models does NOT reset them.
 
-    Opus 4.6            \u2014 Highest quality, burns the shared window fastest (~12-20%/hr)
-    Opus 4.6 (1M ctx)   \u2014 Same shared window; just a larger context size
-    Sonnet 4.6          \u2014 Good quality, ~3-5%/hr burn rate
-    Haiku 4.5           \u2014 Fastest, cheapest, ~1-2%/hr burn rate
+    Fable    \u2014 Most capable, heaviest model; burns the shared window fastest
+    Opus     \u2014 High quality, burns fast (~12-20%/hr observed)
+    Sonnet   \u2014 Good quality, moderate burn (~3-5%/hr)
+    Haiku    \u2014 Cheapest, lightest burn (~1-2%/hr)
+    (1M-context variants draw from the SAME shared window \u2014 just larger context.)
 
   BURN RATE COMPARISON:
 
-    Opus consumes roughly 3-5x more rate limit budget per request than Sonnet.
-    For rate-limit-conscious users, using Sonnet for routine tasks and
-    reserving Opus for complex work dramatically extends daily capacity.
+    The heavy models (Opus, Fable) consume several times more rate-limit budget
+    per request than Sonnet. Fable has no established baseline yet — watch its
+    burn rate. Using Sonnet for routine tasks and reserving the heavy models for
+    complex work dramatically extends daily capacity.
 
-  THE OPUS SUB-CAP:
+  MODEL-SPECIFIC SUB-CAPS (OPUS & FABLE):
 
-    On top of the shared windows, Opus has its own tighter cap ("You've hit
-    your Opus limit"). Switching off Opus lets you keep working past THAT cap,
-    but it does not give you a fresh shared window.
+    On top of the shared windows, the heavy models each have their own tighter
+    cap ("You've hit your Opus limit" / "You've hit your Fable limit"). Switching
+    off that model lets you keep working past THAT cap, but it does not give you
+    a fresh shared window. Eligibility and any model-specific allowances vary by
+    plan — see Anthropic's pricing page; ccvitals only reports what it observes.
 
   WHAT TO DO:
 
     \u2022 Run: ccvitals suggest  to rank models by burn rate
-    \u2022 When Opus is running low, switch to Sonnet \u2014 most coding tasks work fine
+    \u2022 When Opus or Fable is running low, switch to Sonnet \u2014 coding tasks are fine
     \u2022 Use Haiku for simple queries, reviews, and explanations
     \u2022 ccvitals shows switch hints: "try Sonnet (slower burn)"
     \u2022 Run: ccvitals budget  to see how long the shared window lasts

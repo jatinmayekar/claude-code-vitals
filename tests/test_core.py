@@ -483,6 +483,21 @@ def test_cache_health_compact_warning_opus():
     print("  ✓ test_cache_health_compact_warning_opus")
 
 
+def test_compact_threshold_fable():
+    """Fable must use its own compact threshold (75), not the 80 default fallthrough."""
+    snap = RateLimitSnapshot(
+        ts="2026-07-20T15:00:00Z",
+        provider="anthropic", model_id="claude-fable-5", model_name="Fable 5",
+        session_5h_pct=42.0, session_5h_reset=None,
+        weekly_7d_pct=67.0, weekly_7d_reset=None,
+        context_used_pct=72, context_window_size=200000, session_cost_usd=0.5,
+    )
+    result = compute_cache_health(snap, None)
+    assert result["compact_threshold"] == 75, "Fable should map to its own threshold, not the default 80"
+    assert "compact_warning" in result, "72% ctx > 75-10 should warn on Fable"
+    print("  ✓ test_compact_threshold_fable")
+
+
 def test_cache_health_efficiency():
     """Good cache efficiency: cache_read increases, cache_creation stays same."""
     prev = RateLimitSnapshot(
@@ -1068,6 +1083,7 @@ def run_all():
 
     print("\nCache Health:")
     test_cache_health_compact_warning_opus()
+    test_compact_threshold_fable()
     test_cache_health_efficiency()
     test_cache_health_idle_warning()
     test_cache_health_no_idle_warning_when_active()
@@ -1125,6 +1141,7 @@ def run_all():
     print("\nShared-Window Semantics:")
     test_switch_hint_only_for_opus()
     test_switch_hint_suppressed_for_non_opus()
+    test_switch_hint_fires_for_fable()
     test_burn_rate_value_positive_only()
     test_suggest_ranks_by_burn_and_shared_window()
     test_budget_shared_window_framing()
@@ -1171,6 +1188,9 @@ def test_detect_family_known_models():
     assert _detect_family("opus", "Opus 4.6 (1M)") == "Opus"
     assert _detect_family("opus", "Opus 4.6") == "Opus"
     assert _detect_family("claude-haiku-4-5-20251001", "Haiku 4.5") == "Haiku"
+    # Fable — Mythos-class heavy model (must not fall into "Other")
+    assert _detect_family("claude-fable-5", "Fable 5") == "Fable"
+    assert _detect_family("fable", "Fable") == "Fable"
     # Future-proof: unknown models fall into "Other"
     assert _detect_family("gpt-4o", "GPT-4o") == "Other"
     assert _detect_family("gemini-2.0-pro", "Gemini 2.0 Pro") == "Other"
@@ -1463,6 +1483,24 @@ def test_switch_hint_suppressed_for_non_opus():
     assert _compute_switch_hint(mk("claude-sonnet-4-6", "Sonnet 4.6")) is None
     assert _compute_switch_hint(mk("claude-haiku-4-5", "Haiku 4.5")) is None
     print("  ✓ test_switch_hint_suppressed_for_non_opus")
+
+
+def test_switch_hint_fires_for_fable():
+    """Fable is a heavy burner too — it must get a switch hint, not be skipped."""
+    from claude_code_vitals.__main__ import _compute_switch_hint
+    from claude_code_vitals.logger import RateLimitSnapshot
+
+    snap = RateLimitSnapshot(
+        ts="2026-07-20T10:00:00Z", provider="anthropic",
+        model_id="claude-fable-5", model_name="Fable 5",
+        session_5h_pct=85.0, session_5h_reset=None,
+        weekly_7d_pct=40.0, weekly_7d_reset=None,
+        context_used_pct=None, context_window_size=None,
+    )
+    hint = _compute_switch_hint(snap)
+    assert hint is not None, "Fable (heavy burner) should get a switch hint"
+    assert "Sonnet" in hint and "% left" not in hint, hint
+    print("  ✓ test_switch_hint_fires_for_fable")
 
 
 def test_burn_rate_value_positive_only():

@@ -241,12 +241,25 @@ Claude Code -> stdin JSON -> ccvitals
 
 Things we learned by watching the data that Anthropic doesn't document:
 
-- **Shared window, per-model burn rate** -- the 5h and 7d windows are shared across all models (and across Claude Code, chat, and Cowork); switching models does *not* reset them. But Opus burns the shared window ~3-5x faster and has its own tighter cap, so switching to a lighter model extends how long the window lasts and lets you keep working past the Opus limit.
+- **Shared window, per-model burn rate** -- the 5h and 7d windows are shared across all models (and across Claude Code, chat, and Cowork); switching models does *not* reset them. But the heavy models (Opus, Fable) burn the shared window fastest and each have their own tighter cap, so switching to a lighter model extends how long the window lasts and lets you keep working past the Opus/Fable limit.
 - **Opus costs 3-5x more** -- Opus consumes roughly 3-5x more rate limit budget per request than Sonnet.
 - **5-minute cache TTL** -- prompt cache entries expire after 5 minutes of inactivity. Taking a break costs money on your next prompt.
 - **Auto-compact resets cache** -- when Claude Code auto-compacts your context, the entire cache chain resets. The first prompt after compaction is expensive.
 
 See `ccvitals explain cache` and `ccvitals explain models` for details.
+
+## FAQ: Where did my usage go?
+
+Claude Code shows a single percentage, so a ceiling change and a behavior change look identical. When your limit seems to vanish, it's usually one of six things -- and ccvitals is built to tell them apart:
+
+1. **One shared pool.** The 5h and 7d windows are shared across every model (and across Claude Code, chat, and Cowork). There's no separate per-model balance. → `ccvitals suggest`, `ccvitals budget`
+2. **Heavy models burn faster.** Opus and Fable drain the shared window several times faster per request than Sonnet/Haiku -- Fable is the heaviest. → `ccvitals suggest` ranks models by burn rate
+3. **Cache invalidation.** A 5-minute idle gap or an auto-compact resets your prompt cache; the next prompt is expensive. → `ccvitals explain cache`, `ccvitals explain compact`
+4. **Context growth.** A larger context costs more per prompt. → the `ctx:` indicator in the status bar
+5. **Peak hours.** Usage patterns shift during peak windows. → `ccvitals explain peak`
+6. **The ceiling itself moved.** Your limit can change (plan changes, promotions). ccvitals flags this as a *baseline shift* -- same burn rate, but hitting the wall sooner. → the drift signal in the status bar
+
+**Model eligibility and limits vary by plan and change over time** -- ccvitals reports only what it can observe (your utilization and burn rate), never your plan tier. For current limits, Fable access, and any promotions, see [Anthropic's pricing](https://www.anthropic.com/pricing).
 
 ## Data Stored
 

@@ -72,9 +72,10 @@ def print_help():
 # headers and show every raw variant as an indented member. Transparency is
 # the tool's core principle: never silently canonicalize observable data.
 
-_FAMILY_ORDER = ["Opus", "Sonnet", "Haiku", "Other"]
+_FAMILY_ORDER = ["Fable", "Opus", "Sonnet", "Haiku", "Other"]
 
 _FAMILY_KEYWORDS = [
+    ("Fable",  ("fable",)),
     ("Opus",   ("opus",)),
     ("Sonnet", ("sonnet",)),
     ("Haiku",  ("haiku",)),
@@ -357,17 +358,17 @@ def run_statusline(config: Config, log_only: bool = False, debug: bool = False):
 
 
 def _compute_switch_hint(current_snapshot) -> Optional[str]:
-    """Suggest switching off Opus when the shared 5h window is running low.
+    """Suggest switching off a heavy model when the shared 5h window is low.
 
     The 5h/7d windows are shared across all models, so switching does not reset
-    them and there is no separate per-model balance to compare. But Opus burns
-    the shared window ~3-5x faster than Sonnet and carries its own tighter cap,
-    so a switch is only actionable when the current model is Opus — on
-    Sonnet/Haiku a switch wouldn't extend the window. Needs no cross-model
-    history: the "slower burn" claim is model-intrinsic.
+    them and there is no separate per-model balance to compare. But the heavy
+    models (Opus, Fable) burn the shared window fastest and each carry their own
+    tighter cap, so a switch is only actionable when the current model is one of
+    them — on Sonnet/Haiku a switch wouldn't extend the window. Needs no
+    cross-model history: the "slower burn" claim is model-intrinsic.
     """
     family = _detect_family(current_snapshot.model_id, current_snapshot.model_name or "")
-    if family != "Opus":
+    if family not in ("Opus", "Fable"):
         return None
     return "try Sonnet (slower burn)"
 
