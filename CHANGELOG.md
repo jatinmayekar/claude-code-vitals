@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 ### Fixed
+- **`explain` used the wrong command name.** The `ccvitals explain` pages
+  printed `claude_code_vitals` (the Python module) instead of `ccvitals` (the
+  CLI) in titles and example commands. Corrected across all subtopics.
 - **Rate-limit model corrected.** The 5-hour and 7-day windows are SHARED across
   all models (and across Claude Code, chat, and Cowork) — switching models does
   not reset them. Earlier copy claimed each model had its own independent pool

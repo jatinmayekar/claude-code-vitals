@@ -1,13 +1,13 @@
-"""Explain subtopics for claude_code_vitals.
+"""Explain subtopics for ccvitals.
 
 Each function returns a formatted string explaining a specific concept.
-Called via: claude_code_vitals explain <topic>
+Called via: ccvitals explain <topic>
 """
 
 
 def explain_cache() -> str:
     return """
-\u26A1 claude_code_vitals explain cache \u2014 Prompt Cache
+\u26A1 ccvitals explain cache \u2014 Prompt Cache
 
   HOW IT WORKS:
 
@@ -27,7 +27,7 @@ def explain_cache() -> str:
     the timer. So an active coding session keeps the cache warm indefinitely.
     Stop typing for 5+ minutes \u2192 cache evaporates \u2192 next prompt pays full price.
 
-    This is why claude_code_vitals shows idle warnings: "Idle 6min \u2014 cache expired."
+    This is why ccvitals shows idle warnings: "Idle 6min \u2014 cache expired."
 
   WHAT BREAKS THE CACHE:
 
@@ -46,7 +46,7 @@ def explain_cache() -> str:
 
 def explain_compact() -> str:
     return """
-\u26A1 claude_code_vitals explain compact \u2014 Auto-Compaction
+\u26A1 ccvitals explain compact \u2014 Auto-Compaction
 
   WHAT IT IS:
 
@@ -59,7 +59,7 @@ def explain_compact() -> str:
     Sonnet 4.6  \u2192 compacts at ~85% context used
     Haiku 4.5   \u2192 compacts at ~90% context used
 
-    claude_code_vitals shows: "ctx: 72% \u2014 Opus compacts at ~75%"
+    ccvitals shows: "ctx: 72% \u2014 Opus compacts at ~75%"
 
   THE COMPACTION-CACHE CHAIN (why it's expensive):
 
@@ -74,7 +74,7 @@ def explain_compact() -> str:
 
   WHAT TO DO:
 
-    \u2022 When claude_code_vitals warns "approaching compact", finish your current thought
+    \u2022 When ccvitals warns "approaching compact", finish your current thought
     \u2022 Use /compact manually to control WHEN the expensive prompt happens
     \u2022 Manual /compact has the same cost \u2014 but you choose the timing
     \u2022 After compact, expect one expensive prompt, then normal pricing resumes
@@ -83,7 +83,7 @@ def explain_compact() -> str:
 
 def explain_peak() -> str:
     return """
-\u26A1 claude_code_vitals explain peak \u2014 Peak Hours
+\u26A1 ccvitals explain peak \u2014 Peak Hours
 
   TWO DIFFERENT CONCEPTS \u2014 DON'T CONFUSE THEM:
 
@@ -142,7 +142,7 @@ def explain_peak() -> str:
 
 def explain_models() -> str:
     return """
-\u26A1 claude_code_vitals explain models \u2014 Model Rate Limits
+\u26A1 ccvitals explain models \u2014 Model Rate Limits
 
   ONE SHARED WINDOW (NOT PER-MODEL POOLS):
 
@@ -168,11 +168,11 @@ def explain_models() -> str:
 
   WHAT TO DO:
 
-    \u2022 Run: claude_code_vitals suggest  to rank models by burn rate
+    \u2022 Run: ccvitals suggest  to rank models by burn rate
     \u2022 When Opus is running low, switch to Sonnet \u2014 most coding tasks work fine
     \u2022 Use Haiku for simple queries, reviews, and explanations
-    \u2022 claude_code_vitals shows switch hints: "try Sonnet (slower burn)"
-    \u2022 Run: claude_code_vitals budget  to see how long the shared window lasts
+    \u2022 ccvitals shows switch hints: "try Sonnet (slower burn)"
+    \u2022 Run: ccvitals budget  to see how long the shared window lasts
 """
 
 
@@ -193,10 +193,10 @@ def list_topics() -> str:
     """Return list of available explain topics."""
     return """
   Available topics:
-    claude_code_vitals explain cache    \u2014 How prompt caching works and why it matters
-    claude_code_vitals explain compact  \u2014 Auto-compaction, when it triggers, cache impact
-    claude_code_vitals explain peak     \u2014 Anthropic's peak hours (5am-11am PT)
-    claude_code_vitals explain models   \u2014 Model differences, burn rates, shared window
+    ccvitals explain cache    \u2014 How prompt caching works and why it matters
+    ccvitals explain compact  \u2014 Auto-compaction, when it triggers, cache impact
+    ccvitals explain peak     \u2014 Anthropic's peak hours (5am-11am PT)
+    ccvitals explain models   \u2014 Model differences, burn rates, shared window
 
-  Or just: claude_code_vitals explain   \u2014 Full status bar guide
+  Or just: ccvitals explain   \u2014 Full status bar guide
 """
