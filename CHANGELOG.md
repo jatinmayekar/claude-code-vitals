@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.0] — 2026-07-25
 ### Fixed (workflow-testing round)
 - **Uninstall broke wrapped statuslines.** With a wrapped third-party
   statusline, `uninstall` left settings pointing at the wrapper and then
