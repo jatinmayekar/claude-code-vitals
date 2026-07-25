@@ -81,65 +81,6 @@ def explain_compact() -> str:
 """
 
 
-def explain_peak() -> str:
-    return """
-\u26A1 ccvitals explain peak \u2014 Peak Hours
-
-  TWO DIFFERENT CONCEPTS \u2014 DON'T CONFUSE THEM:
-
-    1. ANTHROPIC PEAK (authoritative, applies to everyone)
-       \u2014 Set by Anthropic. Affects your actual rate limits.
-
-    2. YOUR PERSONAL PEAK USAGE (behavioral, opt-in, only about YOU)
-       \u2014 Learned from your own history. Just a pattern, not a limit.
-
-  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-
-  1. ANTHROPIC PEAK (AUTHORITATIVE):
-
-    Window: 5am \u2013 11am PT (12pm \u2013 6pm UTC), weekdays only.
-    Confirmed by Anthropic on March 26, 2026. Still active as of April 2026.
-
-    "During weekdays between 5am\u201311am PT, you'll move through your 5-hour
-    session limits faster than before."
-    \u2014 Anthropic official statement, March 26, 2026
-
-    What changes: your 5-hour session budget depletes faster. Same amount of
-    work = higher burn rate. Weekly (7-day) limits are NOT affected \u2014 only
-    the 5-hour session window.
-
-    Who's affected: ~7% of users. Impact is strongest on Opus.
-
-  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-
-  2. YOUR PERSONAL PEAK USAGE (BEHAVIORAL, OPT-IN):
-
-    This is the window when YOU personally tend to use Claude Code heavily.
-    ccvitals learns it from your own 7+ day history. It is NOT a rate limit
-    and NOT set by Anthropic \u2014 it's just a description of your habits.
-
-    Example: if you code mostly 8PM\u201312AM, your personal pattern is "8PM-12AM".
-
-    This is OFF by default. Enable it with:
-
-        ccvitals config set display.show_personal_pattern true
-
-    When enabled, Row 3 of the status bar shows your learned window.
-    It's purely informational \u2014 it does not change any limits.
-
-  \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-
-  WHAT TO DO:
-
-    \u2022 Schedule heavy/agentic work for off-peak hours (outside 5\u201311 AM PT) when possible
-    \u2022 During Anthropic peak, prefer Sonnet over Opus for routine tasks
-    \u2022 Break large sessions into shorter runs during peak
-    \u2022 If your personal window overlaps Anthropic's peak, `ccvitals suggest`
-      will show a tip pointing it out
-    \u2022 ccvitals shows: "\u26A0 PEAK \u2014 ends 2h 14m" when you're in Anthropic's window
-"""
-
-
 def explain_models() -> str:
     return """
 \u26A1 ccvitals explain models \u2014 Model Rate Limits
@@ -183,7 +124,6 @@ def explain_models() -> str:
 TOPICS = {
     "cache": explain_cache,
     "compact": explain_compact,
-    "peak": explain_peak,
     "models": explain_models,
 }
 
@@ -199,7 +139,6 @@ def list_topics() -> str:
   Available topics:
     ccvitals explain cache    \u2014 How prompt caching works and why it matters
     ccvitals explain compact  \u2014 Auto-compaction, when it triggers, cache impact
-    ccvitals explain peak     \u2014 Anthropic's peak hours (5am-11am PT)
     ccvitals explain models   \u2014 Model differences, burn rates, shared window
 
   Or just: ccvitals explain   \u2014 Full status bar guide

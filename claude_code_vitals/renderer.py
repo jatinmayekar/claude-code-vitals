@@ -59,7 +59,7 @@ def render_compact(result: DriftResult, config: Config) -> str:
     Cache problem:
         Opus 4.6  |  5h: 87% left  |  7d: 84% left  |  Cache: 34%  |  ⚠ CACHE MISS — idle 6min
     Usage spike:
-        ⚠ USAGE SPIKE +25% (you're using more)  |  5h: 32% left  |  3.2x avg  |  ⚠ PEAK ends 2h
+        ⚠ USAGE SPIKE +25% (you're using more)  |  5h: 32% left  |  7d: 12% left
     """
     sig = SIGNAL_DISPLAY[result.signal]
     use_color = config.display.color
@@ -121,15 +121,6 @@ def render_compact(result: DriftResult, config: Config) -> str:
         else:
             row2_parts.append(dep_text)
 
-    # Hourly comparison (only show when >1.5x)
-    if result.hourly_multiplier is not None and result.hourly_multiplier > 1.5:
-        mult_text = f"{result.hourly_multiplier}x avg"
-        if use_color:
-            mult_color = C.RED if result.hourly_multiplier > 3 else C.YELLOW
-            row2_parts.append(f"{mult_color}{mult_text}{C.RESET}")
-        else:
-            row2_parts.append(mult_text)
-
     # Session cost (dim)
     if config.display.show_cost and result.session_cost is not None:
         cost_text = f"${result.session_cost:.2f}"
@@ -138,22 +129,13 @@ def render_compact(result: DriftResult, config: Config) -> str:
         else:
             row2_parts.append(cost_text)
 
-    # Per-prompt delta — ONLY show when meaningful (delta > 0 or anomalous)
-    if result.prompt_delta is not None and (result.prompt_delta > 0 or result.is_anomalous):
-        sign = "+" if result.prompt_delta >= 0 else ""
-        if result.is_anomalous:
-            avg_str = f" (avg {result.avg_prompt_delta}%)" if result.avg_prompt_delta is not None else ""
-            delta_text = f"\u26A0 {sign}{result.prompt_delta}% last prompt{avg_str}"
-            if use_color:
-                row2_parts.append(f"{C.RED}{delta_text}{C.RESET}")
-            else:
-                row2_parts.append(delta_text)
+    # Per-prompt delta — ONLY show when meaningful (delta > 0)
+    if result.prompt_delta is not None and result.prompt_delta > 0:
+        delta_text = f"+{result.prompt_delta}% last prompt"
+        if use_color:
+            row2_parts.append(f"{C.DIM}{delta_text}{C.RESET}")
         else:
-            delta_text = f"{sign}{result.prompt_delta}% last prompt"
-            if use_color:
-                row2_parts.append(f"{C.DIM}{delta_text}{C.RESET}")
-            else:
-                row2_parts.append(delta_text)
+            row2_parts.append(delta_text)
 
     # 5h reset countdown (cyan)
     if result.reset_5h_at is not None:
@@ -163,17 +145,6 @@ def render_compact(result: DriftResult, config: Config) -> str:
                 row1_parts.append(f"{C.CYAN}resets {countdown}{C.RESET}")
             else:
                 row1_parts.append(f"resets {countdown}")
-
-    # Peak indicator (after countdown)
-    if result.is_peak and result.peak_ends_in_minutes is not None:
-        h = result.peak_ends_in_minutes // 60
-        m = result.peak_ends_in_minutes % 60
-        peak_time = f"{h}h {m}m" if h > 0 else f"{m}m"
-        peak_text = f"\u26A0 PEAK ends {peak_time}"
-        if use_color:
-            row2_parts.append(f"{C.YELLOW}{peak_text}{C.RESET}")
-        else:
-            row2_parts.append(peak_text)
 
     # Contextual info based on signal
     if result.signal == Signal.COLLECTING:

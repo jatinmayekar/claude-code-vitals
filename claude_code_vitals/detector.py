@@ -71,11 +71,6 @@ class DriftResult:
     # Per-prompt delta
     prompt_delta: Optional[float] = None      # % change from last prompt
     avg_prompt_delta: Optional[float] = None  # rolling avg % per prompt
-    is_anomalous: bool = False                # delta > 5x average
-
-    # Peak/off-peak status
-    is_peak: bool = False
-    peak_ends_in_minutes: Optional[int] = None  # minutes until peak ends
 
     # Context + cache health
     context_pct: Optional[float] = None
@@ -90,7 +85,6 @@ class DriftResult:
     idle_warning: Optional[str] = None
 
     # Hourly comparison
-    hourly_multiplier: Optional[float] = None  # e.g., 3.2 = burning 3.2x avg          # warning when cache expired from idle
 
     # Switch suggestion (e.g. "try Sonnet (slower burn)") — surfaced when on a
     # fast-burning model (Opus) and the shared window is running low.
@@ -179,7 +173,6 @@ def detect_drift(snapshot: Optional[RateLimitSnapshot], config: Config) -> Drift
 
     # Compute burn rate (works even with few readings)
     burn_rate, depletion = compute_burn_rate(snapshot, history)
-    hourly_mult = hourly_comparison(history, burn_rate, config.tracking.baseline_window_days)
 
     # Not enough data yet
     min_data_points = 10  # Need at least 10 observations for a meaningful baseline
@@ -334,10 +327,7 @@ def detect_drift(snapshot: Optional[RateLimitSnapshot], config: Config) -> Drift
     pattern = detect_time_pattern(history) if config.display.show_pattern else None
 
     # Per-prompt delta
-    prompt_delta, avg_prompt_delta, is_anomalous = compute_prompt_delta(snapshot, history)
-
-    # Peak/off-peak
-    is_peak, peak_ends_in = detect_peak_status(snapshot.ts if snapshot else now)
+    prompt_delta, avg_prompt_delta = compute_prompt_delta(snapshot, history)
 
     # Cache health (need previous snapshot from history)
     prev_snap = history[-1] if history else None
@@ -361,13 +351,9 @@ def detect_drift(snapshot: Optional[RateLimitSnapshot], config: Config) -> Drift
         session_cost=snapshot.session_cost_usd if snapshot else None,
         burn_rate_pct_hr=burn_rate,
         depletion_minutes=depletion,
-        hourly_multiplier=hourly_mult,
         attribution=attribution,
         prompt_delta=prompt_delta,
         avg_prompt_delta=avg_prompt_delta,
-        is_anomalous=is_anomalous,
-        is_peak=is_peak,
-        peak_ends_in_minutes=peak_ends_in,
         context_pct=cache_info.get("context_pct"),
         context_tokens=cache_info.get("context_tokens"),
         compact_threshold=cache_info.get("compact_threshold"),
@@ -443,13 +429,13 @@ def compute_burn_rate(snapshot: Optional[RateLimitSnapshot],
 
 
 def compute_prompt_delta(snapshot: Optional[RateLimitSnapshot],
-                         history: list[RateLimitSnapshot]) -> tuple[Optional[float], Optional[float], bool]:
-    """Compute per-prompt utilization delta and flag anomalies.
+                         history: list[RateLimitSnapshot]) -> tuple[Optional[float], Optional[float]]:
+    """Compute per-prompt utilization delta.
 
-    Returns (delta_pct, avg_delta_pct, is_anomalous).
+    Returns (delta_pct, avg_delta_pct).
     """
     if snapshot is None or snapshot.session_5h_pct is None or not history:
-        return None, None, False
+        return None, None
 
     # Find the previous reading for the same model
     prev = None
@@ -462,7 +448,7 @@ def compute_prompt_delta(snapshot: Optional[RateLimitSnapshot],
             break
 
     if prev is None:
-        return None, None, False
+        return None, None
 
     delta = snapshot.session_5h_pct - prev.session_5h_pct
 
@@ -478,35 +464,8 @@ def compute_prompt_delta(snapshot: Optional[RateLimitSnapshot],
             deltas.append(d)
 
     avg_delta = statistics.median(deltas) if deltas else None
-    is_anomalous = delta > 0 and avg_delta is not None and avg_delta > 0 and delta > avg_delta * 5
 
-    return round(delta, 2), round(avg_delta, 2) if avg_delta else None, is_anomalous
-
-
-PEAK_HOURS_PT = (5, 11)  # 5am-11am PT weekdays (confirmed active April 2026)
-
-def detect_peak_status(snapshot_ts: str) -> tuple[bool, Optional[int]]:
-    """Check if current time falls in Anthropic's official peak window.
-
-    Peak: 5am-11am PT, weekdays only.
-    Returns (is_peak, minutes_until_peak_ends).
-    """
-    try:
-        dt = _parse_iso(snapshot_ts)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        # Convert UTC to PT (UTC-7, ignoring DST for simplicity)
-        pt_hour = (dt.hour - 7) % 24
-        weekday = dt.weekday()  # 0=Monday, 6=Sunday
-
-        is_peak = weekday < 5 and PEAK_HOURS_PT[0] <= pt_hour < PEAK_HOURS_PT[1]
-        if is_peak:
-            hours_left = PEAK_HOURS_PT[1] - pt_hour
-            minutes_left = hours_left * 60 - dt.minute
-            return True, max(0, minutes_left)
-        return False, None
-    except (ValueError, TypeError):
-        return False, None
+    return round(delta, 2), round(avg_delta, 2) if avg_delta else None
 
 
 COMPACT_THRESHOLDS = {
@@ -619,53 +578,6 @@ def compute_cache_health(snapshot: Optional[RateLimitSnapshot],
             result["cache_efficiency"] = round((snapshot.cache_read_tokens / total) * 100, 1)
 
     return result
-
-
-def hourly_comparison(history: list[RateLimitSnapshot],
-                      current_burn_rate: Optional[float],
-                      window_days: int = 7) -> Optional[float]:
-    """Compare current burn rate to 7-day hourly median.
-
-    Returns multiplier (e.g., 3.2 means burning 3.2x faster than average).
-    """
-    if current_burn_rate is None or current_burn_rate <= 0:
-        return None
-
-    cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
-    historical = [s for s in history if s.session_5h_pct is not None]
-    try:
-        historical = [s for s in historical
-                      if _parse_iso(s.ts).replace(tzinfo=timezone.utc) > cutoff]
-    except (ValueError, TypeError):
-        return None
-
-    if len(historical) < 20:
-        return None
-
-    rates = []
-    for i in range(1, len(historical)):
-        try:
-            # Only use same-session pairs
-            if historical[i].session_id and historical[i-1].session_id and historical[i].session_id != historical[i-1].session_id:
-                continue
-            t1 = _parse_iso(historical[i-1].ts).replace(tzinfo=timezone.utc)
-            t2 = _parse_iso(historical[i].ts).replace(tzinfo=timezone.utc)
-            hrs = (t2 - t1).total_seconds() / 3600
-            if 0.05 <= hrs <= 2.0:
-                delta = historical[i].session_5h_pct - historical[i-1].session_5h_pct
-                if delta > 0:
-                    rates.append(delta / hrs)
-        except (ValueError, TypeError):
-            continue
-
-    if not rates:
-        return None
-
-    baseline_rate = statistics.median(rates)
-    if baseline_rate <= 0:
-        return None
-
-    return round(current_burn_rate / baseline_rate, 1)
 
 
 def detect_time_pattern(history: list[RateLimitSnapshot]) -> Optional[str]:

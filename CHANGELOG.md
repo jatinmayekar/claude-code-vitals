@@ -1,6 +1,19 @@
 # Changelog
 
 ## [Unreleased]
+### Removed (slim-down before launch)
+- **`compare` and `report` commands.** Display surfaces overlapping `status`,
+  with the least testing behind them. `baseline` stays (it owns data
+  maintenance: `reset` / `freeze` / `window`).
+- **Peak-hours feature** (status-bar PEAK indicator, `explain peak`, suggest
+  tip). It hardcoded an undocumented "5–11am PT" claim we can't source.
+- **Hourly multiplier ("3.2x avg") and per-prompt anomaly flag.** Two extra
+  "you're using more" signals overlapping the drift signal; the basic
+  per-prompt delta display stays.
+- **OAuth enrichment unwired.** `oauth.py` remains in the package but is no
+  longer called from the run pipeline until it's verified against the live
+  endpoint. The statusline data path is unaffected.
+
 ### Fixed
 - **`status` box misrendered.** The expanded status box was titled
   `claude_code_vitals` (module name, not the CLI) and its top/body/bottom

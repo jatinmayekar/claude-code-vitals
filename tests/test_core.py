@@ -17,11 +17,11 @@ from claude_code_vitals.logger import (
 )
 from claude_code_vitals.detector import (
     detect_drift, Signal, detect_time_pattern,
-    compute_prompt_delta, detect_peak_status, compute_cache_health,
+    compute_prompt_delta, compute_cache_health,
     DriftResult,
 )
 from claude_code_vitals.renderer import render_compact, render_expanded
-from claude_code_vitals.__main__ import _peak_overlap_tip, _parse_pattern_hours
+from claude_code_vitals.__main__ import _parse_pattern_hours
 
 
 def make_config(tmp_dir: Path) -> Config:
@@ -406,38 +406,10 @@ def test_prompt_delta_normal():
             weekly_7d_pct=60.0, weekly_7d_reset=None,
             context_used_pct=10, context_window_size=200000, session_cost_usd=0.4,
         ))
-    delta, avg_delta, is_anomalous = compute_prompt_delta(snap, history)
+    delta, avg_delta = compute_prompt_delta(snap, history)
     assert delta == 3.0, f"Expected delta=3.0, got {delta}"
     assert avg_delta is not None
-    assert is_anomalous is False
     print("  ✓ test_prompt_delta_normal")
-
-
-def test_prompt_delta_anomalous():
-    """Anomalous delta: snapshot at 60%, previous at 42%, avg delta ~1.0 -> anomalous."""
-    # Build history with small consistent deltas (~1.0 each)
-    history = []
-    for i in range(10):
-        history.append(RateLimitSnapshot(
-            ts=f"2026-03-30T14:{40 + i}:00Z",
-            provider="anthropic", model_id="claude-opus-4-6", model_name="Opus 4.6",
-            session_5h_pct=30.0 + i * 1.0, session_5h_reset=None,
-            weekly_7d_pct=60.0, weekly_7d_reset=None,
-            context_used_pct=10, context_window_size=200000, session_cost_usd=0.4,
-        ))
-    # Last history entry is at 39.0, snapshot jumps to 60.0 -> delta=21.0
-    snap = RateLimitSnapshot(
-        ts="2026-03-30T15:00:00Z",
-        provider="anthropic", model_id="claude-opus-4-6", model_name="Opus 4.6",
-        session_5h_pct=60.0, session_5h_reset=None,
-        weekly_7d_pct=67.0, weekly_7d_reset=None,
-        context_used_pct=12, context_window_size=200000, session_cost_usd=0.5,
-    )
-    delta, avg_delta, is_anomalous = compute_prompt_delta(snap, history)
-    assert delta is not None and delta > 15.0, f"Expected large delta, got {delta}"
-    assert avg_delta is not None and avg_delta == 1.0, f"Expected avg_delta=1.0, got {avg_delta}"
-    assert is_anomalous is True, "Expected anomalous=True for delta >> 5*avg"
-    print("  ✓ test_prompt_delta_anomalous")
 
 
 def test_prompt_delta_empty_history():
@@ -449,43 +421,13 @@ def test_prompt_delta_empty_history():
         weekly_7d_pct=67.0, weekly_7d_reset=None,
         context_used_pct=12, context_window_size=200000, session_cost_usd=0.5,
     )
-    delta, avg_delta, is_anomalous = compute_prompt_delta(snap, [])
+    delta, avg_delta = compute_prompt_delta(snap, [])
     assert delta is None
     assert avg_delta is None
-    assert is_anomalous is False
     print("  ✓ test_prompt_delta_empty_history")
 
 
 # --- detect_peak_status tests ---
-
-def test_peak_status_weekday_peak():
-    """8am PT on a weekday (UTC 15:00 Mon) -> is_peak=True."""
-    # 2026-03-30 is a Monday. 15:00 UTC = 8am PT (UTC-7).
-    # Peak is 5am-11am PT, so 8am PT is peak.
-    is_peak, minutes_left = detect_peak_status("2026-03-30T15:00:00Z")
-    assert is_peak is True, f"Expected is_peak=True for 8am PT weekday, got {is_peak}"
-    assert minutes_left is not None and minutes_left > 0
-    # 8am PT -> peak ends at 11am PT = 3 hours = 180 minutes
-    assert minutes_left == 180, f"Expected 180 minutes until peak ends, got {minutes_left}"
-    print("  ✓ test_peak_status_weekday_peak")
-
-
-def test_peak_status_weekday_offpeak():
-    """2pm PT on a weekday (UTC 21:00) -> is_peak=False."""
-    # 21:00 UTC = 2pm PT. Outside 5am-11am PT window.
-    is_peak, minutes_left = detect_peak_status("2026-03-30T21:00:00Z")
-    assert is_peak is False, f"Expected is_peak=False for 2pm PT weekday, got {is_peak}"
-    assert minutes_left is None
-    print("  ✓ test_peak_status_weekday_offpeak")
-
-
-def test_peak_status_weekend():
-    """8am PT on a Saturday -> is_peak=False (weekends not peak)."""
-    # 2026-03-28 is a Saturday. 15:00 UTC = 8am PT.
-    is_peak, minutes_left = detect_peak_status("2026-03-28T15:00:00Z")
-    assert is_peak is False, f"Expected is_peak=False for weekend, got {is_peak}"
-    assert minutes_left is None
-    print("  ✓ test_peak_status_weekend")
 
 
 # --- compute_cache_health tests ---
@@ -738,7 +680,7 @@ def test_prompt_delta_cross_session():
         context_used_pct=20, context_window_size=200000,
         session_cost_usd=2.0, session_id="session-A",
     )
-    delta, avg_delta, is_anomalous = compute_prompt_delta(snap, history)
+    delta, avg_delta = compute_prompt_delta(snap, history)
     assert delta is None, f"Expected None delta for cross-session, got {delta}"
     print("  ✓ test_prompt_delta_cross_session")
 
@@ -1049,22 +991,6 @@ def test_parse_pattern_hours_roundtrip():
     print("  ✓ test_parse_pattern_hours_roundtrip")
 
 
-def test_suggest_tip_no_expired_promo_language():
-    """Whatever the tip says, it must NEVER reference the expired 2x promo."""
-    # Build a history whose detected pattern overlaps PT peak (5-11 AM PT weekdays).
-    # 5-11 AM PT == 13:00-19:00 UTC; those UTC hours fall in buckets 12, 14, 16, 18.
-    history = _make_pattern_history(hot_hours={12, 14, 16, 18})
-    tip = _peak_overlap_tip(history)
-    # Tip may be None (weekend/tz edge cases) or a string. Either way, no promo words.
-    text = tip or ""
-    forbidden = ("2x", "promo", "bonus", "promotional", "PROMO")
-    for word in forbidden:
-        assert word not in text, (
-            f"Expired promo language {word!r} leaked into suggest tip: {text!r}"
-        )
-    print("  ✓ test_suggest_tip_no_expired_promo_language")
-
-
 # ===== Run All =====
 
 def run_all():
@@ -1099,13 +1025,7 @@ def run_all():
     # ===== New Feature Tests =====
     print("\nPrompt Delta:")
     test_prompt_delta_normal()
-    test_prompt_delta_anomalous()
     test_prompt_delta_empty_history()
-
-    print("\nPeak Status:")
-    test_peak_status_weekday_peak()
-    test_peak_status_weekday_offpeak()
-    test_peak_status_weekend()
 
     print("\nCache Health:")
     test_cache_health_compact_warning_opus()
@@ -1148,7 +1068,6 @@ def run_all():
     test_config_show_personal_pattern_defaults_false()
     test_renderer_personal_pattern_hidden_by_default()
     test_parse_pattern_hours_roundtrip()
-    test_suggest_tip_no_expired_promo_language()
 
     print("\nConfig Template:")
     test_write_default_config_branding_and_completeness()

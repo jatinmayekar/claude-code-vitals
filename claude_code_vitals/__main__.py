@@ -8,7 +8,6 @@ from .config import load_config, Config
 from .logger import _parse_iso, parse_statusline_json, extract_snapshot, append_snapshot, should_log
 from .detector import detect_drift, Signal
 from .renderer import render, render_expanded, C
-from .oauth import fetch_usage, oauth_to_snapshot
 
 
 HELP_TEXT = """\
@@ -24,10 +23,8 @@ Commands:
   status              Show current drift signal and recent readings
   suggest             Ranked model availability with burn rates
   budget              Remaining time per model at current burn rate
-  compare             Usage trending across sessions
   baseline            Show rolling median baseline (subcommand: window <N>)
-  report              Generate HTML trend report
-  explain <topic>     Guides: cache | compact | peak | models
+  explain <topic>     Guides: cache | compact | models
   config              View/update configuration (set | list)
   privacy             Show what data is stored and where
   uninstall           Remove all ccvitals data and configuration
@@ -35,21 +32,15 @@ Commands:
   --version           Show version
 
 Common options:
-  --session           Scope to the current session
-  --global            Scope to all sessions
   --show-readings     (status)           Include recent raw readings
-  --all-models        (status, compare)  Include every tracked model
+  --all-models        (status)           Include every tracked model
   --show-remaining    (status)           Include time-remaining columns
   --log-only          (run)              Log only, produce no statusline output
   --debug             (run)              Print debug info to stderr
 
-Scope defaults:
-  status, suggest, budget, baseline   default to --global
-  compare                             defaults to --session
-
 Examples:
   ccvitals init
-  ccvitals status --session
+  ccvitals status
   ccvitals suggest
   ccvitals explain cache
 
@@ -200,8 +191,6 @@ def main():
         run_statusline(config, log_only=log_only, debug=debug)
 
     elif command == "status":
-        if "--session" in args or "--global" in args:
-            print("  Note: --session/--global is supported by compare only. Showing global data.\n")
         show_readings = "--show-readings" in args
         all_models = "--all-models" in args
         show_remaining = "--show-remaining" in args
@@ -209,28 +198,16 @@ def main():
                     all_models=all_models, show_remaining=show_remaining)
 
     elif command == "suggest":
-        if "--session" in args or "--global" in args:
-            print("  Note: --session/--global is supported by compare only. Showing global data.\n")
         show_suggest(config)
 
     elif command == "budget":
-        if "--session" in args or "--global" in args:
-            print("  Note: --session/--global is supported by compare only. Showing global data.\n")
         show_budget(config)
-
-    elif command == "compare":
-        all_models = "--all-models" in args
-        session_mode = "--global" not in args  # default: session
-        show_compare(config, all_models=all_models, session_mode=session_mode)
 
     elif command == "baseline":
         baseline_command(config, args[1:])
 
     elif command == "config":
         config_command(config, args[1:])
-
-    elif command == "report":
-        generate_report(config)
 
     elif command == "uninstall":
         from .init_cmd import uninstall
@@ -298,26 +275,6 @@ def run_statusline(config: Config, log_only: bool = False, debug: bool = False):
     # Extract snapshot
     snapshot = extract_snapshot(data)
 
-    # OAuth enrichment — non-blocking, supplementary only
-    try:
-        oauth_data = fetch_usage(config)
-        if oauth_data is not None:
-            if snapshot is None:
-                model_id = data.get("model", {}).get("id", "unknown")
-                model_name = data.get("model", {}).get("display_name", "unknown")
-                snapshot = oauth_to_snapshot(oauth_data, model_id, model_name)
-            else:
-                if snapshot.session_5h_pct is None:
-                    snapshot.session_5h_pct = oauth_data.five_hour_utilization
-                if snapshot.session_5h_reset is None:
-                    snapshot.session_5h_reset = oauth_data.five_hour_resets_at
-                if snapshot.weekly_7d_pct is None:
-                    snapshot.weekly_7d_pct = oauth_data.seven_day_utilization
-                if snapshot.weekly_7d_reset is None:
-                    snapshot.weekly_7d_reset = oauth_data.seven_day_resets_at
-    except Exception:
-        pass  # OAuth is supplementary — never break the run loop
-
     # Persist current session_id for CLI commands (! ccvitals compare --session)
     if data and data.get("session_id"):
         try:
@@ -326,7 +283,7 @@ def run_statusline(config: Config, log_only: bool = False, debug: bool = False):
         except Exception:
             pass
 
-    # If snapshot is still None after OAuth, show waiting message
+    # If snapshot is None, show waiting message
     if snapshot is None:
         if not log_only:
             model_name = data.get("model", {}).get("display_name", "")
@@ -424,243 +381,6 @@ def _shared_remaining_5h(history: list) -> Optional[int]:
         if s.session_5h_pct is not None:
             return round(100 - s.session_5h_pct)
     return None
-
-
-def show_compare(config: Config, all_models: bool = False, session_mode: bool = True):
-    """Compare burn rates across time periods to show usage trends.
-
-    When session_mode=True: short-term periods (this/last hour) use session data [S],
-    long-term periods (today/yesterday/week) use global data [G].
-    When session_mode=False: all periods use global data [G].
-    """
-    from .logger import _parse_iso, load_history
-    from datetime import datetime, timezone, timedelta
-    from collections import defaultdict
-    import statistics
-
-    history = load_history(config, max_age_days=config.tracking.baseline_window_days)
-    if not history:
-        print("  No data yet. Use Claude Code to collect readings.")
-        return
-
-    now = datetime.now(timezone.utc)
-
-    # Get current session_id for filtering
-    current_sid = _get_current_session_id(config) if session_mode else None
-
-    # Group by model (keep raw model_id keys — no dedupe).
-    # _group_by_family is called below only for the --all-models path;
-    # single-model mode uses the raw by_model dict directly.
-    by_model: dict[str, list] = defaultdict(list)
-    for s in history:
-        by_model[s.model_id].append(s)
-
-    # If single model, pick the most recent by model_id (not dedupe-by-name).
-    if not all_models:
-        latest = history[-1]
-        models_to_show = [latest.model_id]
-    else:
-        models_to_show = None  # handled by family iteration below
-
-    def _parse_ts(ts_str: str) -> Optional[datetime]:
-        try:
-            dt = _parse_iso(ts_str)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            return dt
-        except (ValueError, TypeError):
-            return None
-
-    def _bucket_readings(readings: list, sid: Optional[str] = None) -> dict[str, tuple[list, str]]:
-        """Bucket readings into time periods with scope labels.
-
-        For session mode: short-term (this/last hour) filtered by session_id [S],
-        long-term (today/yesterday/week) use all readings [G].
-        Returns dict of {period: (points, scope_label)}.
-        """
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        yesterday_start = today_start - timedelta(days=1)
-        one_hour_ago = now - timedelta(hours=1)
-        two_hours_ago = now - timedelta(hours=2)
-
-        # Session-filtered readings for short-term
-        if sid:
-            session_readings = [r for r in readings if r.session_id == sid]
-        else:
-            session_readings = readings
-
-        buckets: dict[str, tuple[list, str]] = {}
-
-        # Short-term: session-scoped when sid provided
-        short_source = session_readings if sid else readings
-        short_label = "[S]" if sid else "[G]"
-
-        # Long-term: always global
-        long_label = "[G]"
-
-        for period, source, label, time_filter in [
-            ("This hour", short_source, short_label, lambda dt: dt >= one_hour_ago),
-            ("Last hour", short_source, short_label, lambda dt: two_hours_ago <= dt < one_hour_ago),
-            ("Today", readings, long_label, lambda dt: dt >= today_start),
-            ("Yesterday", readings, long_label, lambda dt: yesterday_start <= dt < today_start),
-            ("This week", readings, long_label, lambda dt: True),
-        ]:
-            points = []
-            for r in source:
-                if r.session_5h_pct is None:
-                    continue
-                dt = _parse_ts(r.ts)
-                if dt is None:
-                    continue
-                if time_filter(dt):
-                    points.append((dt, r.session_5h_pct))
-            buckets[period] = (points, label)
-
-        return buckets
-
-    def _compute_period_stats(points: list[tuple]) -> tuple[Optional[float], Optional[float]]:
-        """Compute burn rate (%/hr) and avg per-prompt delta from sorted (dt, pct) pairs.
-
-        Returns:
-            (burn_rate, avg_prompt_delta) or (None, None) if insufficient data.
-        """
-        if len(points) < 2:
-            return None, None
-
-        sorted_pts = sorted(points, key=lambda p: p[0])
-        total_hours = (sorted_pts[-1][0] - sorted_pts[0][0]).total_seconds() / 3600.0
-        if total_hours <= 0:
-            return None, None
-
-        positive_deltas = []
-        total_positive = 0.0
-        for i in range(1, len(sorted_pts)):
-            delta = sorted_pts[i][1] - sorted_pts[i - 1][1]
-            if delta > 0:
-                positive_deltas.append(delta)
-                total_positive += delta
-
-        burn_rate = total_positive / total_hours if total_hours > 0 else None
-
-        if positive_deltas:
-            avg_delta = statistics.median(positive_deltas)
-        else:
-            avg_delta = 0.0
-
-        return burn_rate, avg_delta
-
-    if all_models:
-        print(f"\n  \u26A1 ccvitals compare --all-models\n")
-
-        families = _group_by_family(by_model)
-        merged = _merge_family_history(families)
-        use_color = config.display.color
-        all_above: list[str] = []  # collect "above baseline" rows across all families
-
-        for family_name, readings in merged:
-            buckets = _bucket_readings(readings, sid=current_sid)
-            week_rate, _ = _compute_period_stats(buckets["This week"][0])
-            hour_rate, _ = _compute_period_stats(buckets["This hour"][0])
-
-            multiplier = None
-            if hour_rate is not None:
-                if week_rate and week_rate > 0:
-                    multiplier = hour_rate / week_rate
-                    mult_str = f"({multiplier:.1f}x your avg)"
-                else:
-                    mult_str = "(no baseline)"
-                rate_str = f"This hour: {hour_rate:.0f}%/hr {mult_str}"
-            else:
-                rate_str = "This hour: \u2014"
-
-            if multiplier is not None and multiplier > 1.2:
-                status = "\u26A0 Above baseline"
-                all_above.append(family_name)
-            elif multiplier is not None and multiplier < 0.8:
-                status = "\u2713 Below baseline"
-            else:
-                status = "\u2713 Normal"
-
-            print(f"  {family_name:<20} {rate_str:<35} {status}")
-
-        print()
-
-        # Verdict
-        if all_above:
-            models_str = ", ".join(all_above)
-            print(f"  Verdict: {models_str} burning faster than usual. Consider switching to another model.")
-        else:
-            print(f"  Verdict: All models are within normal range.")
-        print()
-        return
-
-    # Single model detailed view
-    model_id = models_to_show[0]
-    readings = by_model[model_id]
-    model_name = readings[-1].model_name
-    buckets = _bucket_readings(readings, sid=current_sid)
-
-    print(f"\n  \u26A1 ccvitals compare \u2014 How is your usage trending?\n")
-    header = f"  {model_name}"
-    if current_sid:
-        header += f"    Session: {current_sid[:8]}"
-    print(f"{header}\n")
-    print(f"  {'Period':<20} {'Burn rate':<14} {'Avg per prompt':<19} {'vs. your baseline'}")
-    print(f"  {'─' * 20}    {'─' * 10}    {'─' * 14}     {'─' * 17}")
-
-    # Compute baseline from This week (always global)
-    week_points, _ = buckets["This week"]
-    week_rate, week_delta = _compute_period_stats(week_points)
-
-    period_order = ["This hour", "Last hour", "Today", "Yesterday", "This week"]
-    period_results = {}
-
-    for period in period_order:
-        points, label = buckets[period]
-        rate, delta = _compute_period_stats(points)
-        period_results[period] = (rate, delta)
-
-        period_label = f"{period} {label}"
-        if rate is None:
-            print(f"  {period_label:<20} {'—':<14} {'—':<19} {'—'}")
-            continue
-
-        rate_str = f"{rate:.0f}%/hr"
-        delta_str = f"+{delta:.1f}%/prompt"
-
-        if period == "This week":
-            baseline_str = "\u2190 your baseline"
-        elif week_rate and week_rate > 0:
-            mult = rate / week_rate
-            if mult > 1.1:
-                baseline_str = f"{mult:.1f}x faster"
-            elif mult < 0.9:
-                baseline_str = f"{mult:.1f}x (slower)"
-            else:
-                baseline_str = f"{mult:.1f}x (normal)"
-        else:
-            baseline_str = "—"
-
-        print(f"  {period_label:<20} {rate_str:<14} {delta_str:<19} {baseline_str}")
-
-    # Legend
-    if current_sid:
-        print(f"\n  [S] = this session only    [G] = all sessions (account-level)")
-
-    # Verdict
-    hour_rate = period_results.get("This hour", (None, None))[0]
-    if hour_rate is not None and week_rate and week_rate > 0:
-        mult = hour_rate / week_rate
-        if mult > 1.1:
-            print(f"\n  Verdict: You're burning {mult:.1f}x faster this hour than your weekly average.")
-            print(f"           Your burn rate increased \u2014 this is likely your own usage pattern.")
-        elif mult < 0.9:
-            print(f"\n  Verdict: You're burning {mult:.1f}x slower this hour than your weekly average.")
-        else:
-            print(f"\n  Verdict: Your current burn rate is in line with your weekly average.")
-    else:
-        print(f"\n  Verdict: Not enough data in this hour to compare against your baseline.")
-    print()
 
 
 def baseline_command(config: Config, args: list):
@@ -929,93 +649,6 @@ def _parse_pattern_hours(pattern: str) -> Optional[tuple[int, int]]:
     return (start, end)
 
 
-def _peak_overlap_tip(history: list) -> Optional[str]:
-    """Build a tip string if the user's personal pattern overlaps Anthropic's peak.
-
-    Anthropic's authoritative peak window is 5\u201311 AM Pacific Time on weekdays.
-    The user's personal heavy-usage window (from
-    :func:`detector.detect_time_pattern`) is expressed in their local timezone.
-    We convert the user's pattern start/end to PT, then check for interval overlap
-    with ``[5, 11)`` PT. Returns ``None`` when there is no pattern, no overlap, or
-    the conversion fails. Returns ``None`` on weekends (peak is weekdays only).
-
-    Args:
-        history: The list of snapshots to pass to ``detect_time_pattern``.
-
-    Returns:
-        A multi-line tip string, or ``None``.
-    """
-    from datetime import datetime, timedelta, timezone
-    try:
-        from .detector import detect_time_pattern
-    except ImportError:
-        return None
-
-    try:
-        pattern = detect_time_pattern(history)
-    except Exception:
-        return None
-    if not pattern or not isinstance(pattern, str):
-        return None
-
-    hours = _parse_pattern_hours(pattern)
-    if hours is None:
-        return None
-    start_h, end_h = hours
-
-    # Resolve timezones.
-    now_local = datetime.now().astimezone()
-    local_tz = now_local.tzinfo
-    local_abbrev = now_local.strftime("%Z") or "local"
-
-    try:
-        import zoneinfo
-        try:
-            pt_tz = zoneinfo.ZoneInfo("America/Los_Angeles")
-        except zoneinfo.ZoneInfoNotFoundError:
-            pt_tz = timezone(timedelta(hours=-8))
-    except ImportError:
-        pt_tz = timezone(timedelta(hours=-8))
-
-    # Build today's datetime for the pattern start in local tz, convert to PT.
-    today_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
-    try:
-        start_local = today_local + timedelta(hours=start_h)
-        end_local = today_local + timedelta(hours=end_h)
-        start_pt = start_local.astimezone(pt_tz)
-        end_pt = end_local.astimezone(pt_tz)
-    except (ValueError, OverflowError):
-        return None
-
-    # Weekday check in PT (peak is Mon-Fri PT).
-    now_pt = now_local.astimezone(pt_tz)
-    if now_pt.weekday() >= 5:
-        return None
-
-    # Represent the user's window as hour-offsets from start_pt's midnight (PT).
-    pt_midnight = start_pt.replace(hour=0, minute=0, second=0, microsecond=0)
-    user_start_offset = (start_pt - pt_midnight).total_seconds() / 3600.0
-    user_end_offset = (end_pt - pt_midnight).total_seconds() / 3600.0
-
-    # Anthropic peak: [5, 11) PT today. Allow overlap against both the base
-    # day and a +24h shift in case the user's window wraps into a different PT day.
-    def overlaps(a0: float, a1: float, b0: float, b1: float) -> bool:
-        return a0 < b1 and b0 < a1
-
-    peak_intervals = [(5.0, 11.0), (29.0, 35.0), (-19.0, -13.0)]
-    has_overlap = any(
-        overlaps(user_start_offset, user_end_offset, p0, p1)
-        for p0, p1 in peak_intervals
-    )
-    if not has_overlap:
-        return None
-
-    return (
-        f"  Tip: your peak usage ({pattern} {local_abbrev}) overlaps Anthropic's peak window\n"
-        f"       (5\u201311 AM PT weekdays), when 5-hour session limits burn faster."
-    )
-
-
 def show_suggest(config: Config):
     """Rank selectable models by burn rate against the shared 5h window.
 
@@ -1074,12 +707,6 @@ def show_suggest(config: Config):
         print(f"  {family:<15} {burn_str:>9} {lasts:>14}   {status}")
 
     print()
-
-    # Peak-window overlap tip (factual, weekday-only).
-    tip = _peak_overlap_tip(history)
-    if tip:
-        print(tip)
-        print()
 
     print("  Opus also has its own tighter cap; switching off Opus keeps you working past it.")
     print("  Switch models with /model in Claude Code.")
@@ -1289,160 +916,6 @@ def config_command(config: Config, args: list):
     print("    ccvitals config set <key> <value>")
 
 
-def generate_report(config: Config):
-    """Generate an HTML trend report and open it in the browser."""
-    from .logger import _parse_iso, load_history
-    import webbrowser
-    from pathlib import Path
-
-    history = load_history(config)
-
-    if len(history) < 5:
-        print(f"\u25CB ccvitals — not enough data for a report ({len(history)} points)")
-        print("  Keep using Claude Code and check back in a few days.")
-        return
-
-    # Build simple HTML report with inline chart
-    html = _build_report_html(history)
-
-    report_path = config.data_dir / "report.html"
-    report_path.write_text(html)
-    print(f"  Report saved: {report_path}")
-
-    try:
-        webbrowser.open(f"file://{report_path}")
-        print("  Opened in browser.")
-    except Exception:
-        print(f"  Open manually: file://{report_path}")
-
-
-def _build_report_html(history) -> str:
-    """Build a standalone HTML report with trend charts using Chart.js CDN."""
-
-    # Prepare data series
-    timestamps = []
-    weekly_pcts = []
-    session_pcts = []
-
-    for snap in history:
-        timestamps.append(snap.ts[:16])  # Trim to minute precision
-        weekly_pcts.append(snap.weekly_7d_pct if snap.weekly_7d_pct is not None else "null")
-        session_pcts.append(snap.session_5h_pct if snap.session_5h_pct is not None else "null")
-
-    ts_json = json.dumps(timestamps)
-    weekly_json = json.dumps(weekly_pcts)
-    session_json = json.dumps(session_pcts)
-
-    return f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ccvitals — Rate Limit Trend Report</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<style>
-  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-  body {{ font-family: -apple-system, system-ui, sans-serif; background: #0d1117; color: #c9d1d9; padding: 2rem; }}
-  h1 {{ font-size: 1.5rem; margin-bottom: 0.5rem; color: #58a6ff; }}
-  .subtitle {{ color: #8b949e; margin-bottom: 2rem; }}
-  .chart-container {{ background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; }}
-  .stats {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 2rem; }}
-  .stat {{ background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 1rem; }}
-  .stat-value {{ font-size: 1.8rem; font-weight: bold; color: #58a6ff; }}
-  .stat-label {{ color: #8b949e; font-size: 0.85rem; }}
-  footer {{ color: #484f58; font-size: 0.8rem; margin-top: 2rem; text-align: center; }}
-</style>
-</head>
-<body>
-<h1>\u26A1 ccvitals — Rate Limit Trends</h1>
-<p class="subtitle">Generated from {len(history)} data points</p>
-
-<div class="stats">
-  <div class="stat">
-    <div class="stat-value">{len(history)}</div>
-    <div class="stat-label">Data Points</div>
-  </div>
-  <div class="stat">
-    <div class="stat-value">{history[0].ts[:10] if history else 'N/A'}</div>
-    <div class="stat-label">Tracking Since</div>
-  </div>
-  <div class="stat">
-    <div class="stat-value">{history[-1].provider if history else 'N/A'}</div>
-    <div class="stat-label">Provider</div>
-  </div>
-  <div class="stat">
-    <div class="stat-value">{history[-1].model_name if history else 'N/A'}</div>
-    <div class="stat-label">Current Model</div>
-  </div>
-</div>
-
-<div class="chart-container">
-  <canvas id="trendChart"></canvas>
-</div>
-
-<div class="chart-container">
-  <canvas id="sessionChart"></canvas>
-</div>
-
-<footer>ccvitals v0.2.0 — Know your limits before they know you.</footer>
-
-<script>
-const timestamps = {ts_json};
-const weeklyData = {weekly_json};
-const sessionData = {session_json};
-
-new Chart(document.getElementById('trendChart'), {{
-  type: 'line',
-  data: {{
-    labels: timestamps,
-    datasets: [{{
-      label: '7-Day Utilization %',
-      data: weeklyData,
-      borderColor: '#f85149',
-      backgroundColor: 'rgba(248, 81, 73, 0.1)',
-      fill: true,
-      tension: 0.3,
-      pointRadius: 2,
-    }}]
-  }},
-  options: {{
-    responsive: true,
-    plugins: {{ title: {{ display: true, text: 'Weekly (7d) Rate Limit Utilization', color: '#c9d1d9' }} }},
-    scales: {{
-      x: {{ ticks: {{ color: '#8b949e', maxTicksLimit: 12 }}, grid: {{ color: '#21262d' }} }},
-      y: {{ min: 0, max: 100, ticks: {{ color: '#8b949e' }}, grid: {{ color: '#21262d' }} }}
-    }}
-  }}
-}});
-
-new Chart(document.getElementById('sessionChart'), {{
-  type: 'line',
-  data: {{
-    labels: timestamps,
-    datasets: [{{
-      label: '5-Hour Session Utilization %',
-      data: sessionData,
-      borderColor: '#58a6ff',
-      backgroundColor: 'rgba(88, 166, 255, 0.1)',
-      fill: true,
-      tension: 0.3,
-      pointRadius: 2,
-    }}]
-  }},
-  options: {{
-    responsive: true,
-    plugins: {{ title: {{ display: true, text: 'Session (5h) Rate Limit Utilization', color: '#c9d1d9' }} }},
-    scales: {{
-      x: {{ ticks: {{ color: '#8b949e', maxTicksLimit: 12 }}, grid: {{ color: '#21262d' }} }},
-      y: {{ min: 0, max: 100, ticks: {{ color: '#8b949e' }}, grid: {{ color: '#21262d' }} }}
-    }}
-  }}
-}});
-</script>
-</body>
-</html>"""
-
-
 def show_explain():
     """Explain what every part of the status line means."""
     print("""
@@ -1528,12 +1001,6 @@ def show_explain():
                             its own tighter cap, so a lighter model extends it.
 
     For a full comparison: ! ccvitals suggest
-
-  PEAK HOURS:
-
-    \u26A0 PEAK \u2014 ends 2h 14m \u2014 Anthropic's official peak: 5am-11am PT weekdays.
-                             During peak, your 5-hour limit burns faster.
-                             Schedule heavy work for off-peak when possible.
 
   CONTEXT & CACHE:
 

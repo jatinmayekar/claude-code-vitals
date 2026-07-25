@@ -18,7 +18,6 @@ You're deep in a coding session. Claude starts responding slower, or cuts off ea
 - You used too much quota today
 - Your rate limit ceiling shifted without warning
 - There's a temporary throttle during a model transition
-- It's a peak hour penalty you didn't know about
 - Your cache just reset and you're burning 5x more budget
 
 Existing tools show current usage. Nobody tracks whether the **ceiling itself changed**, predicts when you'll run out, or watches your prompt cache health.
@@ -55,7 +54,7 @@ Opus 4.6  |  5h: 25% left  |  7d: 12% left  |  resets 1h 20m
 ### Usage spike (two rows)
 ```
 Opus 4.6  |  ⚠ USAGE SPIKE +25%  |  5h: 32% left  |  7d: 12% left
-  3.2x avg  |  ⚠ PEAK ends 2h  |  since 3h ago
+  since 3h ago  |  runs out 45m
 ```
 
 ### Cache problem (two rows)
@@ -88,9 +87,6 @@ flowchart TD
     L -->|"No"| N["STABLE (hidden — clean status bar)"]
     
     F --> O["Per-prompt delta display\n+1.2% last prompt"]
-    O --> P{"> 5x your average?"}
-    P -->|"Yes"| Q["⚠ ABNORMAL +7.2% (avg 0.8%)"]
-    P -->|"No"| R["Normal delta shown"]
     
     G --> S{"Cache hit rate\ndropping?"}
     S -->|"Yes"| T["Cache miss warning\n+ root cause detection"]
@@ -116,13 +112,11 @@ This is how claude-code-vitals separates a ceiling shift from a behavior change 
 - **Four signals** -- USAGE SPIKE (yellow), USAGE DROP (blue), COLLECTING (building baseline), STABLE (hidden)
 - **Per-model burn-rate tracking** -- the 5h/7d windows are shared across all models; each model's burn rate against that shared window is tracked separately (Opus drains it ~3-5x faster than Sonnet)
 - **Burn rate + depletion prediction** -- "runs out 45m" based on your current consumption rate (red <60min, yellow <5hr)
-- **Hourly comparison** -- "3.2x avg" shown when burning >1.5x faster than your 7-day hourly median
 - **Model switch suggestions** -- "try Sonnet (slower burn)" when you're on Opus and the shared window is >70% used
 - **Reset countdown** -- time until your 5-hour window resets
 
 ### Per-Prompt Delta
 - **+2.3% last prompt** shown after every response
-- **Abnormal spike detection** -- red warning when a single prompt costs >5x your average
 
 ### Context + Cache Intelligence
 - **Context tracking** -- "ctx: 48% (96k)" with color-coded percentage
@@ -133,8 +127,7 @@ This is how claude-code-vitals separates a ceiling shift from a behavior change 
 
 All cache/context elements use progressive disclosure -- they only appear when something needs your attention.
 
-### Peak Hours + Patterns
-- **Peak hour detection** -- warns during 5am-11am PT weekdays with countdown
+### Display
 - **Color-coded urgency** -- green (<50% used), yellow (50-80%), red (>80%)
 - **Cost display** -- "$3.50" session cost (toggleable)
 
@@ -154,22 +147,15 @@ ccvitals status                         # Show current drift analysis
 ccvitals status --all-models            # Show all models at once
 ccvitals status --show-readings         # Include readings count
 ccvitals status --show-remaining        # Show remaining % instead of used %
-ccvitals compare                        # Usage trending (default: this session)
-ccvitals compare --global               # Usage trending across all sessions
-ccvitals budget                         # Session capacity (default: this session)
-ccvitals budget --global                # Session capacity across all sessions
-ccvitals suggest                        # Ranked model availability with burn rates
-ccvitals suggest --session              # Model availability for this session only
-ccvitals baseline --session             # Baseline from this session only
-ccvitals status --session               # Status for this session only
+ccvitals budget                         # How long the shared window lasts per model
+ccvitals suggest                        # Models ranked by burn rate
+ccvitals baseline                       # Show/maintain rolling baselines (reset|freeze|window)
 ccvitals explain                        # Full status bar guide
 ccvitals explain cache                  # Prompt cache mechanics
 ccvitals explain compact                # Auto-compaction + cache chain breaks
-ccvitals explain peak                   # Peak hours (5am-11am PT weekdays)
-ccvitals explain models                 # Model differences + pool separation
+ccvitals explain models                 # Model differences + shared window
 ccvitals config list                    # View all settings
 ccvitals config set <key> <value>       # Change any setting
-ccvitals report                         # Generate HTML trend report
 ccvitals privacy                        # View privacy policy
 ccvitals uninstall                      # Remove configuration
 ccvitals --version                      # Show version
@@ -213,17 +199,9 @@ color = true                   # ANSI color output
 
 ## Session Tracking
 
-claude-code-vitals tracks your Claude Code session ID to give accurate per-session metrics. Commands default to the most useful scope:
+claude-code-vitals records your Claude Code session ID with each reading and uses it internally to keep burn-rate math honest — consumption deltas are only computed between readings from the same session, so a parallel session can't inflate your burn rate.
 
-| Command | Default | Override |
-|---------|---------|---------|
-| `compare` | `--session` | `--global` |
-| `budget` | `--session` | `--global` |
-| `suggest` | `--global` | `--session` |
-| `baseline` | `--global` | `--session` |
-| `status` | `--global` | `--session` |
-
-**Known limitation:** Session detection is best-effort. The current session ID is saved to a file during each status bar refresh. With multiple concurrent sessions, `--session` may occasionally show data from a different session. For most reliable results, run `!` commands immediately after a Claude Code response.
+**Known limitation:** Session detection is best-effort. With multiple concurrent sessions, cross-session readings are excluded from burn-rate pairs, which can delay a burn-rate estimate until two same-session readings exist.
 
 ## Architecture
 
@@ -232,7 +210,6 @@ Claude Code -> stdin JSON -> ccvitals
                               |-> logger.py    (append to history.jsonl)
                               |-> detector.py  (rolling median + drift + burn rate)
                               |-> renderer.py  (ANSI status bar + cache + delta)
-                              +-> oauth.py     (fallback enrichment)
 ```
 
 **Zero external dependencies.** Pure Python standard library. Runs in well under 100ms.
@@ -256,8 +233,7 @@ Claude Code shows a single percentage, so a ceiling change and a behavior change
 2. **Heavy models burn faster.** Opus and Fable drain the shared window several times faster per request than Sonnet/Haiku -- Fable is the heaviest. → `ccvitals suggest` ranks models by burn rate
 3. **Cache invalidation.** A 5-minute idle gap or an auto-compact resets your prompt cache; the next prompt is expensive. → `ccvitals explain cache`, `ccvitals explain compact`
 4. **Context growth.** A larger context costs more per prompt. → the `ctx:` indicator in the status bar
-5. **Peak hours.** Usage patterns shift during peak windows. → `ccvitals explain peak`
-6. **The ceiling itself moved.** Your limit can change (plan changes, promotions). ccvitals flags this as a *baseline shift* -- same burn rate, but hitting the wall sooner. → the drift signal in the status bar
+5. **The ceiling itself moved.** Your limit can change (plan changes, promotions). ccvitals flags this as a *baseline shift* -- same burn rate, but hitting the wall sooner. → the drift signal in the status bar
 
 **Model eligibility and limits vary by plan and change over time** -- ccvitals reports only what it can observe (your utilization and burn rate), never your plan tier. For current limits, Fable access, and any promotions, see [Anthropic's pricing](https://www.anthropic.com/pricing).
 
@@ -291,13 +267,11 @@ Future versions may add opt-in anonymous crowdsourcing (utilization percentages 
 - [x] Session cost display
 - [x] Self-documenting (`ccvitals explain` with subtopics)
 - [x] Burn rate + depletion prediction
-- [x] Per-prompt delta + abnormal spike detection
-- [x] Hourly comparison ("3.2x avg")
+- [x] Per-prompt delta
 - [x] Model switch suggestions
 - [x] Phase 2: Context + cache intelligence
 - [x] Cache hit rate monitoring with per-model thresholds
 - [x] Compact warnings + idle gap detection
-- [x] Peak hour detection (5am-11am PT)
 - [x] `suggest` and `budget` commands
 - [ ] Multi-provider support (OpenAI, Google)
 - [ ] Crowdsourced baseline (solve cold-start problem)
