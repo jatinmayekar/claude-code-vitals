@@ -184,6 +184,11 @@ def detect_drift(snapshot: Optional[RateLimitSnapshot], config: Config) -> Drift
     # Not enough data yet
     min_data_points = 10  # Need at least 10 observations for a meaningful baseline
     if len(history) < min_data_points:
+        # Keep last_run_ts fresh even on early returns — the idle-gap check on
+        # the next run measures from it; a stale value would fall back to the
+        # debounce-inflated history timestamp (the bug fixed in the main path).
+        state.last_run_ts = datetime.now(timezone.utc).isoformat()
+        save_state(state, config)
         return DriftResult(
             signal=Signal.COLLECTING,
             current_5h_pct=snapshot.session_5h_pct if snapshot else None,
@@ -204,6 +209,8 @@ def detect_drift(snapshot: Optional[RateLimitSnapshot], config: Config) -> Drift
     session_values = [s.session_5h_pct for s in history if s.session_5h_pct is not None]
 
     if not weekly_values:
+        state.last_run_ts = datetime.now(timezone.utc).isoformat()
+        save_state(state, config)
         return DriftResult(
             signal=Signal.COLLECTING,
             reset_5h_at=snapshot.session_5h_reset if snapshot else None,
@@ -237,6 +244,8 @@ def detect_drift(snapshot: Optional[RateLimitSnapshot], config: Config) -> Drift
 
     if current_7d is None:
         # No current reading — maintain previous state
+        state.last_run_ts = datetime.now(timezone.utc).isoformat()
+        save_state(state, config)
         return DriftResult(
             signal=Signal(state.current_signal) if state.current_signal != "collecting" else Signal.NORMAL,
             baseline_7d_pct=baseline_7d,

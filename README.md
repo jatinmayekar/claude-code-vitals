@@ -141,7 +141,7 @@ All cache/context elements use progressive disclosure -- they only appear when s
 ### Passive by Design
 - **Zero API calls** -- reads data Claude Code already provides
 - **Zero token cost** -- purely passive observation
-- **Zero external dependencies** -- pure Python standard library, runs in <50ms
+- **Zero external dependencies** -- pure Python standard library, runs in well under 100ms
 
 ### Progressive Disclosure
 The status bar shows only what matters right now. When everything is fine, you see 4 elements. Alerts, cache warnings, and switch hints only appear when they need your attention. For the full picture anytime: `! ccvitals status --all-models`.
@@ -235,7 +235,7 @@ Claude Code -> stdin JSON -> ccvitals
                               +-> oauth.py     (fallback enrichment)
 ```
 
-**Zero external dependencies.** Pure Python standard library. Runs in <50ms.
+**Zero external dependencies.** Pure Python standard library. Runs in well under 100ms.
 
 ## Key Discoveries
 

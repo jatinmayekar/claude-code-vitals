@@ -274,7 +274,7 @@ def render_compact(result: DriftResult, config: Config) -> str:
 def render_expanded(result: DriftResult, config: Config) -> str:
     """Render a multi-line expanded view.
     
-    ┌─ claude_code_vitals ─────────────────────┐
+    ┌─ ccvitals ─────────────────────┐
     │  Status:    ⚠ LIMITS DECREASED   │
     │  5h usage:  68%  (baseline: 42%) │
     │  7d usage:  91%  (baseline: 67%) │
@@ -285,16 +285,17 @@ def render_expanded(result: DriftResult, config: Config) -> str:
     """
     sig = SIGNAL_DISPLAY[result.signal]
     use_color = config.display.color
-    W = 40  # Inner width
+    W = 46  # Inner width — every row (top, body, bottom) must span exactly W
 
     lines = []
-    lines.append(f"\u250C\u2500 claude_code_vitals {'─' * (W - 13)}\u2510")
+    # "─ ccvitals " is 11 columns after the corner; pad the rest to W
+    lines.append(f"\u250C\u2500 ccvitals {'─' * (W - 11)}\u2510")
 
     # Status line
     status_text = f"{sig['icon']} {sig['label']}"
     if result.deviation_pct is not None and result.signal != Signal.NORMAL:
         status_text += f" ({abs(result.deviation_pct):.0f}% deviation)"
-    lines.append(f"\u2502  {'Status:':<12}{status_text:<{W-14}}\u2502")
+    lines.append(f"\u2502  {'Status:':<12}{status_text[:W-14]:<{W-14}}\u2502")
 
     # 5h usage
     if result.current_5h_pct is not None:
@@ -302,7 +303,7 @@ def render_expanded(result: DriftResult, config: Config) -> str:
         if result.baseline_5h_pct is not None:
             baseline_note = f"  (baseline: {result.baseline_5h_pct:.0f}%)"
         val = f"{result.current_5h_pct:.0f}%{baseline_note}"
-        lines.append(f"\u2502  {'5h usage:':<12}{val:<{W-14}}\u2502")
+        lines.append(f"\u2502  {'5h usage:':<12}{val[:W-14]:<{W-14}}\u2502")
 
     # 7d usage
     if result.current_7d_pct is not None:
@@ -310,7 +311,7 @@ def render_expanded(result: DriftResult, config: Config) -> str:
         if result.baseline_7d_pct is not None:
             baseline_note = f"  (baseline: {result.baseline_7d_pct:.0f}%)"
         val = f"{result.current_7d_pct:.0f}%{baseline_note}"
-        lines.append(f"\u2502  {'7d usage:':<12}{val:<{W-14}}\u2502")
+        lines.append(f"\u2502  {'7d usage:':<12}{val[:W-14]:<{W-14}}\u2502")
 
     # Change date
     if result.change_detected_at and result.signal != Signal.NORMAL:
@@ -321,17 +322,17 @@ def render_expanded(result: DriftResult, config: Config) -> str:
         except (ValueError, TypeError):
             date_str = "unknown"
         val = f"{date_str}  ({since})"
-        lines.append(f"\u2502  {'Changed:':<12}{val:<{W-14}}\u2502")
+        lines.append(f"\u2502  {'Changed:':<12}{val[:W-14]:<{W-14}}\u2502")
 
     # Pattern
     if result.pattern:
-        lines.append(f"\u2502  {'Pattern:':<12}{result.pattern:<{W-14}}\u2502")
+        lines.append(f"\u2502  {'Pattern:':<12}{result.pattern[:W-14]:<{W-14}}\u2502")
 
     # Source
     source = f"Local ({result.baseline_count} points)"
-    lines.append(f"\u2502  {'Source:':<12}{source:<{W-14}}\u2502")
+    lines.append(f"\u2502  {'Source:':<12}{source[:W-14]:<{W-14}}\u2502")
 
-    lines.append(f"\u2514{'─' * (W - 1)}\u2518")
+    lines.append(f"\u2514{'─' * W}\u2518")
 
     return "\n".join(lines)
 

@@ -1,5 +1,18 @@
 # Changelog
 
+## [Unreleased]
+### Fixed
+- **`status` box misrendered.** The expanded status box was titled
+  `claude_code_vitals` (module name, not the CLI) and its top/body/bottom
+  borders used three different widths, producing ragged edges; long status
+  text could also overflow the frame. Now titled `ccvitals` with every row
+  clamped and padded to one width.
+- **Idle-gap tracking during COLLECTING.** `detect_drift`'s early returns
+  skipped saving `last_run_ts`, so the first idle check after the collecting
+  phase measured from a debounce-inflated history timestamp.
+- **README timing claim.** "<50ms" measured ~80ms wall including interpreter
+  startup; now says "well under 100ms".
+
 ## [0.3.0] — 2026-07-21
 ### Added
 - **Claude Fable 5 awareness.** Fable is now a recognized model family (was

@@ -351,11 +351,36 @@ def test_render_expanded():
     config = Config()
     config.display.color = False
     output = render_expanded(result, config)
-    assert "claude_code_vitals" in output
+    assert "ccvitals" in output
+    assert "claude_code_vitals" not in output, "box title must use the CLI name, not the module name"
     assert "68%" in output
     assert "baseline: 42%" in output
     assert "200 points" in output
+    # Border alignment: every row of the box must span the same width
+    lines = [l for l in output.split("\n") if l.strip()]
+    widths = {len(l) for l in lines}
+    assert len(widths) == 1, f"ragged box borders — line widths {sorted(widths)}"
     print("  ✓ test_render_expanded")
+
+
+def test_detect_drift_collecting_saves_last_run_ts():
+    """Early COLLECTING returns must still stamp last_run_ts, or the first
+    post-collecting idle check falls back to debounce-inflated history gaps."""
+    from claude_code_vitals.detector import load_state
+    with tempfile.TemporaryDirectory() as tmp:
+        config = make_config(Path(tmp))
+        snap = RateLimitSnapshot(
+            ts="2026-07-24T10:00:00Z", provider="anthropic",
+            model_id="claude-opus-4-6", model_name="Opus 4.6",
+            session_5h_pct=42.0, session_5h_reset=None,
+            weekly_7d_pct=67.0, weekly_7d_reset=None,
+            context_used_pct=12, context_window_size=200000,
+        )
+        result = detect_drift(snap, config)  # no history -> COLLECTING path
+        assert result.signal == Signal.COLLECTING
+        state = load_state(config)
+        assert state.last_run_ts is not None, "COLLECTING return must save last_run_ts"
+    print("  ✓ test_detect_drift_collecting_saves_last_run_ts")
 
 
 # ===== New Feature Tests =====
@@ -1069,6 +1094,7 @@ def run_all():
     test_render_compact_spike()
     test_render_collecting()
     test_render_expanded()
+    test_detect_drift_collecting_saves_last_run_ts()
 
     # ===== New Feature Tests =====
     print("\nPrompt Delta:")
