@@ -40,28 +40,28 @@ That's it. `ccvitals init` configures your Claude Code status bar automatically.
 
 ## What You See
 
-### Normal (single row)
-```
-Opus 4.6  |  5h: 87% left  |  7d: 84% left  |  resets 2h 17m
-```
+### Normal — clean single row
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="videos/shots/bar-normal-dark.png">
+  <img alt="Status bar: Opus 4.6, 5h and 7d usage, reset countdown" src="videos/shots/bar-normal-light.png">
+</picture>
 
-### Running low (two rows)
-```
-Opus 4.6  |  5h: 25% left  |  7d: 12% left  |  resets 1h 20m
-  runs out 45m  |  try Sonnet (slower burn)
-```
+### Usage spike — drift detected, with attribution
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="videos/shots/bar-spike-dark.png">
+  <img alt="Status bar showing USAGE SPIKE +19.5% (baseline shift)" src="videos/shots/bar-spike-light.png">
+</picture>
 
-### Usage spike (two rows)
-```
-Opus 4.6  |  ⚠ USAGE SPIKE +25%  |  5h: 32% left  |  7d: 12% left
-  since 3h ago  |  runs out 45m
-```
+### Running low — depletion ETA, compact warning, switch hint
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="videos/shots/bar-low-dark.png">
+  <img alt="Status bar showing runs out 17m, compact warning, try Sonnet" src="videos/shots/bar-low-light.png">
+</picture>
 
-### Cache problem (two rows)
-```
-Opus 4.6  |  5h: 87% left  |  7d: 84% left  |  resets 2h 17m
-  ctx: 72% (144k)  |  Cache: 34%  |  ⚠ CACHE MISS — idle 6min
-```
+### A week with ccvitals in 30 seconds
+![first signal](videos/first-signal.gif)
+
+*Simulated readings, real pipeline: the 5h window sawtooths all week with zero false alarms; a sustained ceiling shift is confirmed after three consecutive readings.*
 
 ### Multi-Row Progressive Disclosure
 Row 1 always shows essentials (model, percentages, countdown). Row 2 appears only when something needs attention (alerts, cache issues, depletion warnings). Clean when everything is fine.
@@ -160,6 +160,16 @@ ccvitals privacy                        # View privacy policy
 ccvitals uninstall                      # Remove configuration
 ccvitals --version                      # Show version
 ```
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="videos/shots/suggest-dark.png">
+  <img alt="ccvitals suggest: shared 5h window, models ranked by burn rate" src="videos/shots/suggest-light.png">
+</picture>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="videos/shots/budget-dark.png">
+  <img alt="ccvitals budget: how long the shared window lasts at each model's burn rate" src="videos/shots/budget-light.png">
+</picture>
 
 ## Configuration
 
