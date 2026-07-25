@@ -27,7 +27,7 @@ Commands:
   explain <topic>     Guides: cache | compact | models
   config              View/update configuration (set | list)
   privacy             Show what data is stored and where
-  uninstall           Remove all ccvitals data and configuration
+  uninstall           Remove statusLine config (restores any wrapped statusline; keeps data)
   help, --help, -h    Show this message
   --version           Show version
 
@@ -286,7 +286,7 @@ def run_statusline(config: Config, log_only: bool = False, debug: bool = False):
     # If snapshot is None, show waiting message
     if snapshot is None:
         if not log_only:
-            model_name = data.get("model", {}).get("display_name", "")
+            model_name = (data.get("model") or {}).get("display_name", "")
             if model_name:
                 print(f"{model_name}  |  waiting for rate limit data...")
             else:

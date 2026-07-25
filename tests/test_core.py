@@ -1005,6 +1005,7 @@ def run_all():
     test_extract_snapshot()
     test_extract_no_rate_limits()
     test_extract_snapshot_legacy_session_weekly()
+    test_extract_snapshot_hostile_inputs()
     test_append_and_load()
     test_json_line_compact()
 
@@ -1082,6 +1083,7 @@ def run_all():
     print("\nInit Upgrade:")
     test_init_upgrades_legacy_limitwatch_in_place()
     test_init_wraps_unrelated_third_party_statusline()
+    test_uninstall_restores_wrapped_statusline()
 
     print("\nShared-Window Semantics:")
     test_switch_hint_only_for_opus()
@@ -1544,6 +1546,91 @@ def test_budget_shared_window_framing():
     assert "Window lasts" in out, "reframed time-to-depletion column"
     assert "Remaining" not in out, "old per-model balance column must be gone"
     print("  ✓ test_budget_shared_window_framing")
+
+
+def test_uninstall_restores_wrapped_statusline():
+    """Uninstalling a wrapped setup must restore the user's ORIGINAL command.
+
+    Regression: uninstall's substring check missed wrapper paths, so it left
+    settings pointing at the wrapper and then deleted the wrapper — breaking
+    the user's own statusline and losing the only copy of their command.
+    """
+    import tempfile
+    from claude_code_vitals import init_cmd
+
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        config = make_config(home / ".claude-code-vitals")
+        config.ensure_data_dir()
+        fake_settings = home / ".claude" / "settings.json"
+        fake_settings.parent.mkdir(parents=True)
+        wrapper = config.data_dir / "statusline-wrapper.sh"
+        wrapper.write_text(
+            '#!/bin/bash\nINPUT=$(cat)\n'
+            'echo "$INPUT" | python3 -m claude_code_vitals run --log-only &>/dev/null &\n'
+            'echo "$INPUT" | bash /opt/other/status.sh\n')
+        fake_settings.write_text(json.dumps({
+            "statusLine": {"type": "command", "command": f"bash {wrapper}"}}))
+
+        original_path = init_cmd.CLAUDE_SETTINGS_PATH
+        init_cmd.CLAUDE_SETTINGS_PATH = fake_settings
+        try:
+            init_cmd.uninstall(config)
+        finally:
+            init_cmd.CLAUDE_SETTINGS_PATH = original_path
+
+        result = json.loads(fake_settings.read_text())
+        cmd = result.get("statusLine", {}).get("command", "")
+        assert cmd == "bash /opt/other/status.sh", f"original not restored: {cmd!r}"
+        assert not wrapper.exists(), "wrapper script must be removed"
+    print("  ✓ test_uninstall_restores_wrapped_statusline")
+
+
+def test_extract_snapshot_hostile_inputs():
+    """Hostile statusline JSON must yield None or a clean snapshot — never raise.
+
+    Regression for five fuzz-found crash classes: null objects, null leaves,
+    absurd epochs, string/negative/out-of-range percentages, and (separately
+    in load_history) corrupted records with non-string ts.
+    """
+    hostile = [
+        {"model": None, "rate_limits": None},
+        {"model": {"id": None, "display_name": None},
+         "rate_limits": {"five_hour": {"used_percentage": None, "resets_at": None}}},
+        {"model": {"id": "x", "display_name": "X"},
+         "rate_limits": {"five_hour": {"used_percentage": 250, "resets_at": 99999999999999}}},
+        {"model": {"id": "x", "display_name": "X"},
+         "rate_limits": {"five_hour": {"used_percentage": "42", "resets_at": "soon"}}},
+        {"model": {"id": "x", "display_name": "X"},
+         "rate_limits": {"five_hour": {"used_percentage": -50, "resets_at": 123}}},
+        {"model": {"id": "x", "display_name": "X"},
+         "rate_limits": {"five_hour": {"used_percentage": True, "resets_at": True}}},
+    ]
+    for data in hostile:
+        snap = extract_snapshot(data)  # must not raise
+        if snap is not None:
+            assert snap.session_5h_pct is None or 0 <= snap.session_5h_pct <= 100
+
+    # valid reading must still parse (validator must not over-reject)
+    ok = extract_snapshot({"model": {"id": "claude-opus-4-6", "display_name": "Opus"},
+        "rate_limits": {"five_hour": {"used_percentage": 42.0, "resets_at": 1990000000}}})
+    assert ok is not None and ok.session_5h_pct == 42.0
+
+    # load_history must skip corrupted records (non-string ts, junk lines)
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        config = make_config(Path(tmp))
+        config.ensure_data_dir()
+        (config.data_dir / "history.jsonl").write_text(
+            'not json\n{"ts": 5}\n'
+            + json.dumps({"ts": "2026-07-25T10:00:00+00:00", "provider": "anthropic",
+                          "model_id": "m", "model_name": "M", "session_5h_pct": 10.0,
+                          "session_5h_reset": None, "weekly_7d_pct": 20.0,
+                          "weekly_7d_reset": None, "context_used_pct": None,
+                          "context_window_size": None}) + "\n")
+        history = load_history(config, max_age_days=7)
+        assert len(history) == 1, f"expected only the valid record, got {len(history)}"
+    print("  ✓ test_extract_snapshot_hostile_inputs")
 
 
 if __name__ == "__main__":

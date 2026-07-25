@@ -1,4 +1,4 @@
-from .logger import _parse_iso
+from .logger import _parse_iso, utcnow
 """Status bar renderer for claude_code_vitals.
 
 Formats DriftResult into ANSI-colored terminal output for Claude Code's
@@ -330,7 +330,7 @@ def _format_countdown(iso_str: str) -> Optional[str]:
         dt = _parse_iso(iso_str)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        remaining = (dt - datetime.now(timezone.utc)).total_seconds()
+        remaining = (dt - utcnow()).total_seconds()
         if remaining <= 0:
             return None
         h = int(remaining // 3600)
@@ -348,7 +348,7 @@ def _format_relative_time(iso_str: str) -> str:
         dt = _parse_iso(iso_str)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        now = datetime.now(timezone.utc)
+        now = utcnow()
         delta = now - dt
 
         if delta.days == 0:

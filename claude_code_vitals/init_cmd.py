@@ -9,6 +9,7 @@ Sets up:
 import json
 import sys
 import shutil
+from typing import Optional
 from pathlib import Path
 
 from .config import Config, CLAUDE_SETTINGS_PATH, write_default_config
@@ -139,24 +140,57 @@ echo "$INPUT" | {existing_cmd}
     return wrapper_path
 
 
+def _original_from_wrapper(config: Config) -> Optional[str]:
+    """Recover the user's original statusline command from the wrapper script.
+
+    The wrapper's last pipeline line is `echo "$INPUT" | <original command>`.
+    Returns None if the wrapper is missing or unparseable.
+    """
+    wrapper = config.data_dir / "statusline-wrapper.sh"
+    if not wrapper.exists():
+        return None
+    try:
+        for line in reversed(wrapper.read_text().splitlines()):
+            line = line.strip()
+            if line.startswith('echo "$INPUT" | ') and "claude_code_vitals" not in line:
+                return line[len('echo "$INPUT" | '):].strip()
+    except (PermissionError, OSError):
+        pass
+    return None
+
+
 def uninstall(config: Config) -> None:
     """Remove claude_code_vitals configuration."""
     print("🧹 claude_code_vitals — uninstalling...\n")
 
-    # Remove from Claude Code settings
+    # Remove from Claude Code settings. Three shapes:
+    #   1. plain ccvitals command        -> delete statusLine
+    #   2. our wrapper around the user's -> RESTORE their original command
+    #      original statusline              (recovered from the wrapper script
+    #                                        BEFORE the wrapper is deleted)
+    #   3. anything else                 -> leave untouched
     if CLAUDE_SETTINGS_PATH.exists():
         try:
             settings = json.loads(CLAUDE_SETTINGS_PATH.read_text())
             sl = settings.get("statusLine", {})
             sl_cmd = sl.get("command", "") if isinstance(sl, dict) else ""
-            if isinstance(sl, dict) and ("ccvitals" in sl_cmd or "claude_code_vitals" in sl_cmd or "limitwatch" in sl_cmd):
+            if isinstance(sl, dict) and "statusline-wrapper.sh" in sl_cmd:
+                original = _original_from_wrapper(config)
+                if original:
+                    settings["statusLine"]["command"] = original
+                    print(f"  ✓ Restored your original statusLine: {original}")
+                else:
+                    del settings["statusLine"]
+                    print("  ✓ Removed wrapped statusLine (original could not be recovered)")
+                CLAUDE_SETTINGS_PATH.write_text(json.dumps(settings, indent=2) + "\n")
+            elif isinstance(sl, dict) and ("ccvitals" in sl_cmd or "claude_code_vitals" in sl_cmd or "limitwatch" in sl_cmd):
                 del settings["statusLine"]
                 CLAUDE_SETTINGS_PATH.write_text(json.dumps(settings, indent=2) + "\n")
                 print("  ✓ Removed from Claude Code statusLine")
         except Exception:
             pass
 
-    # Remove wrapper script
+    # Remove wrapper script (after restoration above)
     wrapper = config.data_dir / "statusline-wrapper.sh"
     if wrapper.exists():
         wrapper.unlink()

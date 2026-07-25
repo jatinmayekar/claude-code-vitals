@@ -7,9 +7,10 @@ Zero API calls. Zero token cost. Pure passive observation.
 """
 
 import json
+import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from dataclasses import dataclass, asdict
 from typing import Optional
@@ -102,12 +103,48 @@ def _parse_reset_time(value) -> Optional[str]:
     """Normalize resets_at to ISO 8601 string.
 
     Claude Code sends either a Unix timestamp (int) or an ISO string.
+    Malformed or out-of-range values yield None — a bad reset time must
+    never crash the status bar.
     """
     if value is None:
         return None
+    if isinstance(value, bool):
+        return None
     if isinstance(value, (int, float)):
-        return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
+        try:
+            return datetime.fromtimestamp(value, tz=timezone.utc).isoformat()
+        except (ValueError, OverflowError, OSError):
+            return None
     return str(value)
+
+
+def utcnow() -> datetime:
+    """Current UTC time; honors CCVITALS_FAKE_NOW (ISO 8601) for replay testing.
+
+    The env var is a test-only hook — unset in normal operation, so production
+    behavior is identical to datetime.now(timezone.utc).
+    """
+    fake = os.environ.get("CCVITALS_FAKE_NOW")
+    if fake:
+        try:
+            dt = _parse_iso(fake)
+            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            pass
+    return datetime.now(timezone.utc)
+
+
+def _valid_pct(value) -> Optional[float]:
+    """Validate a used_percentage: numeric and within 0-100, else None.
+
+    Strings, booleans, negatives, and >100 readings are provider glitches —
+    logging them would poison the baseline, and comparing them crashes.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if not (0.0 <= value <= 100.0):
+        return None
+    return float(value)
 
 
 def extract_snapshot(data: dict) -> Optional[RateLimitSnapshot]:
@@ -115,12 +152,13 @@ def extract_snapshot(data: dict) -> Optional[RateLimitSnapshot]:
     if not data:
         return None
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = utcnow().isoformat()
 
-    # Model info
-    model = data.get("model", {})
-    model_id = model.get("id", "unknown")
-    model_name = model.get("display_name", "unknown")
+    # Model info — `or {}` / `or "unknown"` because Claude Code may send
+    # explicit JSON nulls, and a null must never crash the status bar
+    model = data.get("model") or {}
+    model_id = model.get("id") or "unknown"
+    model_name = model.get("display_name") or "unknown"
 
     # Session ID (if provided)
     session_id = data.get("session_id")
@@ -132,27 +170,27 @@ def extract_snapshot(data: dict) -> Optional[RateLimitSnapshot]:
     # Claude Code has used two different field name formats:
     #   Old: rate_limits.session / rate_limits.weekly, resets_at as ISO string
     #   New: rate_limits.five_hour / rate_limits.seven_day, resets_at as Unix timestamp
-    rate_limits = data.get("rate_limits", {})
+    rate_limits = data.get("rate_limits") or {}
     session = rate_limits.get("session") or rate_limits.get("five_hour") or {}
     weekly = rate_limits.get("weekly") or rate_limits.get("seven_day") or {}
 
-    session_5h_pct = session.get("used_percentage")
+    session_5h_pct = _valid_pct(session.get("used_percentage"))
     session_5h_reset = _parse_reset_time(session.get("resets_at"))
-    weekly_7d_pct = weekly.get("used_percentage")
+    weekly_7d_pct = _valid_pct(weekly.get("used_percentage"))
     weekly_7d_reset = _parse_reset_time(weekly.get("resets_at"))
 
     # Context window + token counts + cache tokens
-    ctx = data.get("context_window", {})
+    ctx = data.get("context_window") or {}
     context_used_pct = ctx.get("used_percentage")
     context_window_size = ctx.get("context_window_size")
     total_input_tokens = ctx.get("total_input_tokens")
     total_output_tokens = ctx.get("total_output_tokens")
-    usage = ctx.get("current_usage", {})
+    usage = ctx.get("current_usage") or {}
     cache_read_tokens = usage.get("cache_read_input_tokens")
     cache_creation_tokens = usage.get("cache_creation_input_tokens")
 
     # Cost
-    cost = data.get("cost", {})
+    cost = data.get("cost") or {}
     session_cost_usd = cost.get("total_cost_usd")
 
     # Skip if we got no useful rate limit data at all
@@ -201,8 +239,7 @@ def load_history(config: Config, max_age_days: int | None = None) -> list[RateLi
 
     cutoff = None
     if max_age_days is not None:
-        cutoff_ts = time.time() - (max_age_days * 86400)
-        cutoff = datetime.fromtimestamp(cutoff_ts, tz=timezone.utc).isoformat()
+        cutoff = (utcnow() - timedelta(days=max_age_days)).isoformat()
 
     snapshots = []
     with open(config.history_path, "r") as f:
@@ -215,7 +252,10 @@ def load_history(config: Config, max_age_days: int | None = None) -> list[RateLi
             except json.JSONDecodeError:
                 continue
 
-            if cutoff and d.get("ts", "") < cutoff:
+            ts_val = d.get("ts", "")
+            if not isinstance(ts_val, str):
+                continue  # corrupted record — never let it crash the pipeline
+            if cutoff and ts_val < cutoff:
                 continue
 
             # Reconstruct snapshot with defaults for missing fields

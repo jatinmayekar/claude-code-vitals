@@ -1,6 +1,26 @@
 # Changelog
 
 ## [Unreleased]
+### Fixed (workflow-testing round)
+- **Uninstall broke wrapped statuslines.** With a wrapped third-party
+  statusline, `uninstall` left settings pointing at the wrapper and then
+  deleted it — breaking the user's own status bar and losing their original
+  command. Uninstall now recovers the original command from the wrapper and
+  restores it before removing the wrapper.
+- **Five crash classes on hostile input.** Null JSON objects/leaves, absurd
+  epoch `resets_at`, string/negative/out-of-range percentages, and corrupted
+  history records (non-string `ts`) each crashed the status bar. Inputs are
+  now validated (`_valid_pct`, null-safe access, guarded epoch parse) and
+  corrupted history lines are skipped; junk readings are rejected rather than
+  logged so they can't poison the baseline.
+
+### Added
+- **Sawtooth replay harness** (`tests/test_replay.py`) — end-to-end audit that
+  drives the real CLI through 7-day traces: a stable sawtooth week must fire
+  zero signals; injected ±18 weekly shifts must fire within the debounce
+  window; multi-model weeks must not false-positive. Uses a new test-only
+  `CCVITALS_FAKE_NOW` clock hook (inert in production).
+
 ### Removed (slim-down before launch)
 - **`compare` and `report` commands.** Display surfaces overlapping `status`,
   with the least testing behind them. `baseline` stays (it owns data

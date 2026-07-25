@@ -16,7 +16,7 @@ from typing import Optional
 from pathlib import Path
 
 from .config import Config
-from .logger import _parse_iso, RateLimitSnapshot, load_history
+from .logger import _parse_iso, RateLimitSnapshot, load_history, utcnow
 
 
 class Signal(Enum):
@@ -180,7 +180,7 @@ def detect_drift(snapshot: Optional[RateLimitSnapshot], config: Config) -> Drift
         # Keep last_run_ts fresh even on early returns — the idle-gap check on
         # the next run measures from it; a stale value would fall back to the
         # debounce-inflated history timestamp (the bug fixed in the main path).
-        state.last_run_ts = datetime.now(timezone.utc).isoformat()
+        state.last_run_ts = utcnow().isoformat()
         save_state(state, config)
         return DriftResult(
             signal=Signal.COLLECTING,
@@ -202,7 +202,7 @@ def detect_drift(snapshot: Optional[RateLimitSnapshot], config: Config) -> Drift
     session_values = [s.session_5h_pct for s in history if s.session_5h_pct is not None]
 
     if not weekly_values:
-        state.last_run_ts = datetime.now(timezone.utc).isoformat()
+        state.last_run_ts = utcnow().isoformat()
         save_state(state, config)
         return DriftResult(
             signal=Signal.COLLECTING,
@@ -237,7 +237,7 @@ def detect_drift(snapshot: Optional[RateLimitSnapshot], config: Config) -> Drift
 
     if current_7d is None:
         # No current reading — maintain previous state
-        state.last_run_ts = datetime.now(timezone.utc).isoformat()
+        state.last_run_ts = utcnow().isoformat()
         save_state(state, config)
         return DriftResult(
             signal=Signal(state.current_signal) if state.current_signal != "collecting" else Signal.NORMAL,
@@ -285,7 +285,7 @@ def detect_drift(snapshot: Optional[RateLimitSnapshot], config: Config) -> Drift
         state.consecutive_drop = 0
 
     # Apply debounce
-    now = datetime.now(timezone.utc).isoformat()
+    now = utcnow().isoformat()
     confirmed_signal = Signal(state.current_signal) if state.current_signal != "collecting" else Signal.NORMAL
 
     if raw_signal == Signal.SPIKE and state.consecutive_spike >= debounce:
@@ -382,7 +382,7 @@ def compute_burn_rate(snapshot: Optional[RateLimitSnapshot],
         return None, None
 
     current_pct = snapshot.session_5h_pct
-    current_ts = _parse_iso(snapshot.ts) if snapshot.ts else datetime.now(timezone.utc)
+    current_ts = _parse_iso(snapshot.ts) if snapshot.ts else utcnow()
     if current_ts.tzinfo is None:
         current_ts = current_ts.replace(tzinfo=timezone.utc)
 
